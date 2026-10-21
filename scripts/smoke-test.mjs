@@ -4,6 +4,8 @@
 // Direct to Patreon (run on your own machine, not a server):
 //   SESSION_ID=xxx node scripts/smoke-test.mjs
 //
+// Pick a creator: add CREATOR=avaritia (case-insensitive name match).
+//
 // Through the deployed (or `wrangler dev`) Worker:
 //   SESSION_ID=xxx PROXY_URL=https://patron-reader.<you>.workers.dev \
 //   PROXY_KEY=yyy node scripts/smoke-test.mjs
@@ -98,8 +100,12 @@ try {
     for (const c of campaigns) console.log(`   - ${c.attributes?.name} [${c.id}]`);
   }
 
-  // 3: latest posts from the first campaign
-  const c = campaigns[0];
+  // 3: latest posts from one campaign (CREATOR=<name substring> to choose).
+  const want = (process.env.CREATOR || "").toLowerCase();
+  const c =
+    (want && campaigns.find((x) => (x.attributes?.name || "").toLowerCase().includes(want))) ||
+    campaigns[0];
+  // No fields[post] filter: we want to see every attribute Patreon returns.
   const posts = await api(
     "/api/posts?" +
       qs({
@@ -108,18 +114,29 @@ try {
         "filter[is_draft]": "false",
         sort: "-published_at",
         "page[count]": "5",
-        "fields[post]": "title,content,published_at,url,current_user_can_view,post_type,image",
         "json-api-use-default-includes": "false",
         "json-api-version": "1.0",
       })
   );
-  console.log(`\n✓ Latest posts from ${c.attributes?.name}:`);
-  for (const p of posts.data || []) {
+  const list = posts.data || [];
+  console.log(`\n✓ Latest ${list.length} posts from ${c.attributes?.name}:`);
+  for (const p of list) {
     const a = p.attributes || {};
     const body = strip(a.content);
-    const status = a.current_user_can_view === false ? "LOCKED" : body ? "readable" : "no text";
-    console.log(`   - [${status}] ${a.published_at?.slice(0, 10)} ${a.title}`);
+    const teaser = strip(a.teaser_text);
+    const status =
+      a.current_user_can_view === false ? "LOCKED" : body ? "readable" : teaser ? "teaser only" : "no text";
+    console.log(`   - [${status}] ${a.published_at?.slice(0, 10)} ${a.title}  (type: ${a.post_type})`);
     if (body) console.log(`       ${body.slice(0, 100)}${body.length > 100 ? "…" : ""}`);
+  }
+  if (list[0]) {
+    const a = list[0].attributes || {};
+    console.log("\n  Attributes on the newest post (for debugging):");
+    for (const [k, v] of Object.entries(a)) {
+      const shown =
+        typeof v === "string" ? `string(${v.length})` : v === null ? "null" : Array.isArray(v) ? "array" : typeof v;
+      console.log(`    ${k}: ${shown}`);
+    }
   }
   console.log("\nDone. If posts show 'readable', the whole approach works.");
 } catch (err) {
