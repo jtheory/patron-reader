@@ -785,11 +785,19 @@ const PAUSE_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5"
 const listeningHere = () => listening && current && listening.postId === current.post.id;
 const isPlaying = () => listeningHere() && listening.listener.state === "playing";
 
-// Right-edge buttons: only once listening has started in this chapter.
+// Is the paragraph listening stopped at still on screen? Past this point,
+// play starts from the top of the screen instead (see playPause).
+function pausedSpotOnScreen() {
+  const r = blockEls()[listening.listener.index]?.getBoundingClientRect();
+  return !!r && r.bottom > barHeight() && r.top < innerHeight;
+}
+
+// Right-edge buttons: only once listening has started in this chapter, and
+// when paused, only while the paused paragraph is still on screen.
 function updatePlayer() {
-  const on = listeningHere() && listening.listener.state !== "stopped";
+  const st = listeningHere() ? listening.listener.state : "stopped";
+  const on = st === "playing" || (st === "paused" && pausedSpotOnScreen());
   $("audio").hidden = !on;
-  document.body.classList.toggle("has-audio", on);
   if (on) {
     $("au-toggle").innerHTML = isPlaying() ? PAUSE_SVG : PLAY_SVG;
     $("au-toggle").setAttribute("aria-label", isPlaying() ? "Pause" : "Play");
@@ -805,10 +813,7 @@ function playPause() {
   if (!listeningHere()) return startListening(current.post, readerSpot()?.i || 0);
   const l = listening.listener;
   if (l.state === "playing") return l.pause();
-  const el = blockEls()[l.index];
-  const r = el?.getBoundingClientRect();
-  const onScreen = r && r.bottom > barHeight() && r.top < innerHeight;
-  if (!onScreen) l.seek(readerSpot()?.i || 0);
+  if (!pausedSpotOnScreen()) l.seek(readerSpot()?.i || 0);
   l.play();
 }
 
@@ -828,7 +833,8 @@ const controlsOpen = () => $("controls").classList.contains("open");
 function updateControls() {
   const canPlay = !!current?.listenable;
   $("ct-play").hidden = !canPlay;
-  $("ct-play").innerHTML = (isPlaying() ? PAUSE_SVG : PLAY_SVG) + `<span>${isPlaying() ? "Pause" : "Listen"}</span>`;
+  $("ct-play").innerHTML = isPlaying() ? PAUSE_SVG : PLAY_SVG;
+  $("ct-play").setAttribute("aria-label", isPlaying() ? "Pause" : "Listen");
   $("ct-rate").textContent = rateLabel(settings.rate);
   $("ct-slower").disabled = settings.rate <= RATES[0];
   $("ct-faster").disabled = settings.rate >= RATES.at(-1);
@@ -885,6 +891,7 @@ $("ct-larger").addEventListener("click", () => stepSize(0.0625));
 
 addEventListener("scroll", () => {
   if (controlsOpen() && Date.now() > pinUntil && Date.now() > controlsHold) hideControls();
+  if (listeningHere() && listening.listener.state === "paused") updatePlayer();
 }, { passive: true });
 
 // ---------------------------------------------------------------- position memory
