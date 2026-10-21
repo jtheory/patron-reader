@@ -4,7 +4,7 @@
 // Direct to Patreon (run on your own machine, not a server):
 //   SESSION_ID=xxx node scripts/smoke-test.mjs
 //
-// Pick a creator: add CREATOR=avaritia (case-insensitive name match).
+// Pick a creator: add CREATOR=ddwebb (ignores case, spaces, punctuation).
 //
 // Through the deployed (or `wrangler dev`) Worker:
 //   SESSION_ID=xxx PROXY_URL=https://patron-reader.<you>.workers.dev \
@@ -50,6 +50,40 @@ async function api(path) {
 }
 
 const qs = (o) => new URLSearchParams(o).toString();
+// Patreon stores post bodies as a JSON rich-text doc (ProseMirror-style):
+// { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text }] }] }
+// Flatten it to plain text, one line per block, just to check it's there.
+function jsonText(str) {
+  if (!str) return "";
+  let doc;
+  try {
+    doc = JSON.parse(str);
+  } catch {
+    return "";
+  }
+  const out = [];
+  const walk = (n) => {
+    if (!n || typeof n !== "object") return;
+    if (typeof n.text === "string") out.push(n.text);
+    if (Array.isArray(n.content)) n.content.forEach(walk);
+    if (/paragraph|heading|blockquote|listItem|list_item/i.test(n.type || "")) out.push("\n");
+  };
+  walk(doc);
+  return out.join("").replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim();
+}
+function nodeTypes(str) {
+  const seen = new Set();
+  const walk = (n) => {
+    if (!n || typeof n !== "object") return;
+    if (n.type) seen.add(n.type);
+    if (Array.isArray(n.content)) n.content.forEach(walk);
+    if (Array.isArray(n.marks)) n.marks.forEach((m) => m.type && seen.add("mark:" + m.type));
+  };
+  try {
+    walk(JSON.parse(str));
+  } catch {}
+  return [...seen];
+}
 const strip = (html) => (html || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 
 try {
@@ -101,10 +135,16 @@ try {
   }
 
   // 3: latest posts from one campaign (CREATOR=<name substring> to choose).
-  const want = (process.env.CREATOR || "").toLowerCase();
-  const c =
-    (want && campaigns.find((x) => (x.attributes?.name || "").toLowerCase().includes(want))) ||
-    campaigns[0];
+  const norm = (x) => (x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const want = norm(process.env.CREATOR);
+  let c = campaigns[0];
+  if (want) {
+    c = campaigns.find((x) => norm(x.attributes?.name).includes(want));
+    if (!c) {
+      console.error(`✗ No creator matches CREATOR=${process.env.CREATOR}`);
+      process.exit(1);
+    }
+  }
   // No fields[post] filter: we want to see every attribute Patreon returns.
   const posts = await api(
     "/api/posts?" +
@@ -120,24 +160,26 @@ try {
   );
   const list = posts.data || [];
   console.log(`\n✓ Latest ${list.length} posts from ${c.attributes?.name}:`);
+  const allTypes = new Set();
   for (const p of list) {
     const a = p.attributes || {};
-    const body = strip(a.content);
-    const teaser = strip(a.teaser_text);
+    const body = jsonText(a.content_json_string) || strip(a.content);
+    const teaser = jsonText(a.teaser_text_json_string) || strip(a.teaser_text);
+    nodeTypes(a.content_json_string).forEach((t) => allTypes.add(t));
     const status =
-      a.current_user_can_view === false ? "LOCKED" : body ? "readable" : teaser ? "teaser only" : "no text";
-    console.log(`   - [${status}] ${a.published_at?.slice(0, 10)} ${a.title}  (type: ${a.post_type})`);
-    if (body) console.log(`       ${body.slice(0, 100)}${body.length > 100 ? "…" : ""}`);
+      a.current_user_can_view === false
+        ? `LOCKED, needs ${(a.min_cents_pledged_to_view || 0) / 100}`
+        : body
+          ? `readable, ${body.length} chars`
+          : teaser
+            ? "teaser only"
+            : "no text";
+    const billing = a.is_automated_monthly_charge ? " [billing post]" : "";
+    console.log(`   - [${status}] ${a.published_at?.slice(0, 10)} ${a.title}${billing}`);
+    const preview = (body || teaser).replace(/\n/g, " / ");
+    if (preview) console.log(`       ${preview.slice(0, 110)}${preview.length > 110 ? "…" : ""}`);
   }
-  if (list[0]) {
-    const a = list[0].attributes || {};
-    console.log("\n  Attributes on the newest post (for debugging):");
-    for (const [k, v] of Object.entries(a)) {
-      const shown =
-        typeof v === "string" ? `string(${v.length})` : v === null ? "null" : Array.isArray(v) ? "array" : typeof v;
-      console.log(`    ${k}: ${shown}`);
-    }
-  }
+  if (allTypes.size) console.log(`\n  Rich-text node types seen: ${[...allTypes].join(", ")}`);
   console.log("\nDone. If posts show 'readable', the whole approach works.");
 } catch (err) {
   console.error("✗ " + err.message);
