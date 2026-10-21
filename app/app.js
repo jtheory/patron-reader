@@ -830,7 +830,9 @@ function renderSettings() {
     ),
     err
   );
-  view.replaceChildren(form, ...(settings.session && settings.key ? [deviceSection()] : []));
+  // A new device most likely wants to scan; one that's set up offers its code.
+  if (settings.session && settings.key) view.replaceChildren(form, deviceSection());
+  else view.replaceChildren(receiveSection(), form);
 }
 
 // ---------------------------------------------------------------- set up another device
@@ -848,11 +850,9 @@ function connectLink() {
   return location.origin + location.pathname + "#/connect/" + payload;
 }
 
-function takeConnectLink() {
-  const m = location.hash.match(/^#\/connect\/([\w-]+)/);
-  if (!m) return false;
-  history.replaceState(null, "", "#/");
-  lastHash = "#/";
+// Accepts a full setup link (or just its payload); returns true if it was applied.
+function applySetup(text) {
+  const m = String(text).trim().match(/(?:#\/connect\/)?([\w-]{8,})\s*$/);
   try {
     const d = JSON.parse(unb64url(m[1]));
     if (!d.s || !d.k) throw new Error("incomplete");
@@ -861,10 +861,88 @@ function takeConnectLink() {
     saveSettings();
     showStatus("This device is set up. Loading your feed…");
     if (changed) sync().then(() => showStatus("Up to date."), handleError);
+    return true;
   } catch {
-    showStatus("That setup link is damaged. Show a fresh QR code on your other device and scan again.", { error: true, sticky: true });
+    showStatus("That setup code is damaged. Show a fresh code on your other device and try again.", { error: true, sticky: true });
+    return false;
   }
+}
+
+function takeConnectLink() {
+  if (!/^#\/connect\//.test(location.hash)) return false;
+  const link = location.hash;
+  history.replaceState(null, "", "#/");
+  lastHash = "#/";
+  applySetup(link);
   return true;
+}
+
+// Scan a setup code with this device's camera, so it lands in *this* browser
+// (opening a scanned link would go to the default browser instead).
+async function scanSetupCode(area) {
+  const detector = new BarcodeDetector({ formats: ["qr_code"] });
+  const video = h("video", { class: "scanner", playsinline: true, muted: true });
+  const cancel = h("button", { class: "secondary", type: "button" }, "Cancel");
+  area.replaceChildren(video, h("p", { class: "hint" }, "Point the camera at the setup code on your other device."), cancel);
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+  } catch {
+    area.replaceChildren(h("p", { class: "warn" }, "The camera isn't available. Allow camera access for this site, or paste the setup link below."));
+    return;
+  }
+  video.srcObject = stream;
+  await video.play().catch(() => {});
+  video.scrollIntoView({ block: "center", behavior: "smooth" });
+  let done = false;
+  const stop = () => {
+    done = true;
+    stream.getTracks().forEach((t) => t.stop());
+    area.replaceChildren();
+  };
+  cancel.addEventListener("click", stop);
+  addEventListener("hashchange", stop, { once: true });
+  while (!done) {
+    try {
+      const codes = await detector.detect(video);
+      const hit = codes.find((c) => /#\/connect\//.test(c.rawValue));
+      if (hit) {
+        stop();
+        if (applySetup(hit.rawValue)) location.hash = "#/";
+        return;
+      }
+    } catch {}
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
+
+function receiveSection() {
+  const area = h("div", { class: "scan-area" });
+  const paste = h("input", { id: "f-setup", type: "text", autocomplete: "off", spellcheck: "false", placeholder: "Paste a setup link" });
+  const canScan = "BarcodeDetector" in window && navigator.mediaDevices?.getUserMedia;
+  return h(
+    "section",
+    { class: "device" },
+    h("h2", {}, "Copy setup from another device"),
+    h("p", { class: "lede" }, "On a device that's already set up, open Settings and tap Show setup code. Then scan it from here."),
+    canScan
+      ? h("button", { class: "secondary", type: "button", onclick: () => scanSetupCode(area) }, "Scan setup code")
+      : h("p", { class: "hint" }, "This browser can't scan codes. Paste the setup link instead."),
+    area,
+    h(
+      "div",
+      { class: "field paste-row" },
+      h("label", { for: "f-setup" }, "Or paste a setup link"),
+      paste,
+      h("button", {
+        class: "secondary",
+        type: "button",
+        onclick: () => {
+          if (paste.value.trim() && applySetup(paste.value)) location.hash = "#/";
+        },
+      }, "Use link")
+    )
+  );
 }
 
 async function qrSvg(text) {
@@ -911,7 +989,7 @@ function deviceSection() {
       });
       box.replaceChildren(
         await qrSvg(link),
-        h("p", { class: "hint" }, "Scan with your phone's camera. On Android, scan from Chrome (tap the address bar, then the camera icon) so it opens in Chrome rather than another browser."),
+        h("p", { class: "hint" }, "On your phone, open this site in the browser you'll use it from, go to Settings, and tap Scan setup code."),
         h("p", { class: "warn" }, "This code contains your Patreon session: anyone who scans it can use your account. Hide it once your phone is set up."),
         copy
       );

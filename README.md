@@ -78,10 +78,13 @@ Pick the final address before installing the app on your phone: your session, se
 ## 3. Install it on your phone
 
 1. Set it up on your computer first: open your Worker address, paste your **Patreon session** and **access key** in Settings, and tap **Save and load feed**.
-2. Still in Settings on the computer, tap **Show setup code** under *Set up another device*, and scan the QR code with your phone. It opens the app on your phone already signed in. (On Android, scan from Chrome: tap the address bar, then the camera icon, so it opens in Chrome.) Hide the code afterwards: it contains your session.
+2. On your phone, open the same address **in the browser you'll use the app from** (on Android, Chrome is best). It offers **Scan setup code**.
+3. On the computer, in Settings, tap **Show setup code** under *Set up another device*, and scan it with the phone's **Scan setup code** button. The phone saves both values and loads your feed. Hide the code afterwards: it contains your session.
+
+   (Scanning with the phone's own camera app would open the link in your *default* browser, which may not be the one you want, so scan from inside the app.)
 
    No computer handy? Open the address on your phone and paste both values in Settings instead.
-3. On your phone, add it to your home screen:
+4. On your phone, add it to your home screen:
    - **iPhone (Safari):** Share button › **Add to Home Screen**.
    - **Android (Chrome):** ⋮ menu › **Install app** (or *Add to Home screen*).
 

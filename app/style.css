@@ -362,6 +362,12 @@ main { max-width: calc(var(--measure) + 2 * var(--gutter)); margin: 0 auto; }
   padding-top: 1.5rem;
   border-top: 1px solid var(--rule);
 }
+.device:first-child {
+  margin: 0;
+  padding: 1.5rem var(--gutter) 1.75rem;
+  border-top: 0;
+  border-bottom: 1px solid var(--rule);
+}
 .device h2 { font-size: 1.25rem; margin: 0 0 .4rem; }
 .device .lede { color: var(--quiet); margin: 0 0 1rem; }
 .device .secondary { margin-left: 0; }
@@ -374,3 +380,16 @@ main { max-width: calc(var(--measure) + 2 * var(--gutter)); margin: 0 auto; }
 }
 .qr-box .hint { color: var(--quiet); font-size: .9375rem; }
 .warn { color: var(--error); font-size: .9375rem; }
+
+.scanner {
+  display: block;
+  width: min(100%, 22rem);
+  aspect-ratio: 1;
+  object-fit: cover;
+  margin: 1rem 0 .5rem;
+  border-radius: 6px;
+  background: var(--wash);
+}
+.scan-area .hint, .device .hint { color: var(--quiet); font-size: .9375rem; }
+.paste-row { margin-top: 1.5rem; }
+.paste-row .secondary { margin: .6rem 0 0; }
