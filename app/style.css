@@ -73,8 +73,18 @@ button, input, select { font: inherit; color: inherit; }
   background: var(--paper);
   border-bottom: 1px solid var(--rule);
 }
+.bar-text { flex: 1; min-width: 0; }
+.bar-author {
+  display: block;
+  font-size: .8125rem;
+  line-height: 1.2;
+  color: var(--quiet);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .bar-title {
-  flex: 1;
   margin: 0;
   font-size: 1.0625rem;
   font-weight: 700;
@@ -302,17 +312,6 @@ main { max-width: calc(var(--measure) + 2 * var(--gutter)); margin: 0 auto; }
   text-decoration: none;
 }
 
-.size-controls { display: inline-flex; gap: .25rem; }
-.size-controls button {
-  min-width: 2.5rem;
-  height: 2.5rem;
-  border: 1px solid var(--rule);
-  border-radius: 999px;
-  background: none;
-  cursor: pointer;
-  color: var(--quiet);
-}
-
 /* ---------- settings ---------- */
 
 .settings { padding: 1.5rem var(--gutter) 3rem; }
@@ -394,22 +393,17 @@ main { max-width: calc(var(--measure) + 2 * var(--gutter)); margin: 0 auto; }
 .paste-row { margin-top: 1.5rem; }
 .paste-row .secondary { margin: .6rem 0 0; }
 
-/* ---------- listening ---------- */
 
-.listen-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: .45rem;
-  margin: -1.1rem 0 2rem;
-  padding: .45rem 1rem;
-  border: 1px solid var(--accent);
-  border-radius: 999px;
-  background: none;
-  color: var(--accent);
-  font-size: .9375rem;
-  cursor: pointer;
-}
-.listen-btn span { font-size: .7em; }
+.secondary.danger { display: block; margin: 1.75rem 0 0; color: var(--error); border-color: currentColor; }
+body { touch-action: manipulation; } /* taps register instantly, no double-tap zoom */
+html { overscroll-behavior-y: contain; } /* our pull-to-refresh, not the browser's */
+
+/* ---------- reading: top bar ---------- */
+
+.bar-post .bar-title { font-size: .9375rem; line-height: 1.25; }
+.bar-post #home { margin-left: -.6rem; }
+
+/* ---------- reading: highlight while listening ---------- */
 
 .body .speaking {
   background: var(--wash);
@@ -417,33 +411,29 @@ main { max-width: calc(var(--measure) + 2 * var(--gutter)); margin: 0 auto; }
   border-radius: 2px;
 }
 
-.player {
+/* ---------- reading: audio buttons (right edge) ---------- */
+
+.audio {
   position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  right: max(.75rem, env(safe-area-inset-right));
+  bottom: calc(1.5rem + env(safe-area-inset-bottom));
   z-index: 6;
-  padding: .55rem var(--gutter) calc(.6rem + env(safe-area-inset-bottom));
-  background: var(--paper);
-  border-top: 2px solid var(--accent);
-}
-.pl-title {
-  max-width: var(--measure);
-  margin: 0 auto .35rem;
-  font-size: .875rem;
-  color: var(--quiet);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.pl-controls {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  max-width: var(--measure);
-  margin: 0 auto;
+  gap: .35rem;
+  padding: .35rem;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--paper);
+  box-shadow: 0 6px 20px rgba(20, 28, 25, .16);
+  transition: bottom .2s ease;
 }
-.pl-btn {
+/* Make room so the buttons don't sit on top of line endings. */
+body.has-audio .reader .body { padding-right: 3.6rem; }
+@media (min-width: 46rem) { body.has-audio .reader .body { padding-right: 0; } }
+body.has-controls .audio { bottom: calc(5.5rem + env(safe-area-inset-bottom)); }
+.au-btn {
   display: inline-grid;
   place-items: center;
   width: 2.75rem;
@@ -454,66 +444,114 @@ main { max-width: calc(var(--measure) + 2 * var(--gutter)); margin: 0 auto; }
   color: var(--ink);
   cursor: pointer;
 }
-.pl-btn svg { width: 1.4rem; height: 1.4rem; }
-.pl-main { width: 3.25rem; height: 3.25rem; background: var(--accent); color: var(--paper); }
-.pl-btn:active { background: var(--wash); }
-.pl-main:active { background: var(--accent); opacity: .85; }
-.pl-rate {
-  min-width: 3.5rem;
-  height: 2.5rem;
-  border: 1px solid var(--rule);
-  border-radius: 999px;
-  background: none;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
-}
-body.has-player { padding-bottom: calc(7rem + env(safe-area-inset-bottom)); }
-.secondary.danger { color: var(--error); border-color: currentColor; margin: .75rem 0 0; display: block; }
+.au-btn svg { width: 1.35rem; height: 1.35rem; }
+.au-main { width: 3rem; height: 3rem; background: var(--accent); color: var(--paper); }
+.au-btn:active { background: var(--wash); }
+.au-main:active { background: var(--accent); opacity: .85; }
 
-/* ---------- tap controls ---------- */
+/* ---------- reading: tap controls (slide up) ---------- */
 
-body { touch-action: manipulation; } /* no double-tap zoom delay on taps */
-.quick {
+.controls {
   position: fixed;
-  left: 50%;
-  bottom: calc(1.25rem + env(safe-area-inset-bottom));
+  left: 0;
+  right: 0;
+  bottom: 0;
   z-index: 7;
-  transform: translateX(-50%);
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: .5rem;
-  padding: .4rem;
+  padding: .6rem max(var(--gutter), calc((100vw - var(--measure)) / 2)) calc(.6rem + env(safe-area-inset-bottom));
+  background: var(--paper);
+  border-top: 1px solid var(--rule);
+  box-shadow: 0 -6px 20px rgba(20, 28, 25, .1);
+  transform: translateY(105%);
+  visibility: hidden;
+  transition: transform .2s ease, visibility 0s linear .2s;
+}
+.controls.open {
+  transform: none;
+  visibility: visible;
+  transition: transform .2s ease;
+}
+@media (prefers-reduced-motion: reduce) { .controls, .controls.open, .audio { transition: none; } }
+.ct-play {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  height: 2.75rem;
+  padding: 0 1rem 0 .8rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--paper);
+  cursor: pointer;
+}
+.ct-play svg { width: 1.2rem; height: 1.2rem; }
+.ct-group {
+  display: flex;
+  align-items: center;
   border: 1px solid var(--rule);
   border-radius: 999px;
-  background: var(--paper);
-  box-shadow: 0 6px 24px rgba(20, 28, 25, .18);
 }
-body.has-player .quick { bottom: calc(7.25rem + env(safe-area-inset-bottom)); }
-.q-group { display: flex; }
-.q-btn, .q-listen {
-  height: 2.75rem;
+.ct-btn {
+  min-width: 2.6rem;
+  height: 2.6rem;
   border: 0;
   border-radius: 999px;
   background: none;
   color: var(--ink);
+  font-size: 1.125rem;
   cursor: pointer;
 }
-.q-btn { min-width: 3rem; font-size: 1.0625rem; }
-.q-btn + .q-btn { border-left: 1px solid var(--rule); border-radius: 0 999px 999px 0; }
-.q-group .q-btn:first-child { border-radius: 999px 0 0 999px; }
-.q-listen {
-  display: inline-flex;
-  align-items: center;
-  gap: .45rem;
-  padding: 0 1.1rem;
-  background: var(--accent);
+.ct-btn:disabled { color: var(--locked); cursor: default; }
+.ct-btn:not(:disabled):active { background: var(--wash); }
+.ct-a { font-size: 1rem; }
+.ct-a + .ct-a { border-left: 1px solid var(--rule); border-radius: 0 999px 999px 0; }
+.ct-group .ct-a:first-child { border-radius: 999px 0 0 999px; }
+.ct-value { min-width: 2.6rem; text-align: center; font-size: .9375rem; font-variant-numeric: tabular-nums; }
+
+/* ---------- pull to refresh ---------- */
+
+.ptr {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + 3.25rem);
+  left: 50%;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  margin-top: -3rem;
+  border-radius: 50%;
+  background: var(--paper);
+  color: var(--quiet);
+  box-shadow: 0 2px 10px rgba(20, 28, 25, .18);
+  transform: translate(-50%, 0);
+  opacity: 0;
+  pointer-events: none;
+}
+.ptr svg { width: 1.3rem; height: 1.3rem; }
+.ptr.pulling { opacity: 1; }
+.ptr.ready { color: var(--accent); }
+
+/* ---------- toast ---------- */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(1.5rem + env(safe-area-inset-bottom));
+  z-index: 8;
+  max-width: calc(100vw - 2 * var(--gutter));
+  padding: .55rem 1.1rem;
+  border-radius: 999px;
+  background: var(--ink);
   color: var(--paper);
+  font-size: .9375rem;
+  transform: translate(-50%, .75rem);
+  opacity: 0;
+  transition: opacity .25s ease, transform .25s ease;
+  pointer-events: none;
 }
-.q-listen span { font-size: .7em; }
-.q-btn:active { background: var(--wash); }
-@media (prefers-reduced-motion: no-preference) {
-  .quick:not([hidden]) { animation: quick-in .16s ease-out; }
-  @keyframes quick-in { from { opacity: 0; transform: translate(-50%, .5rem); } }
-}
-.settings .secondary + .secondary.danger { margin-top: .75rem; }
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+body.has-controls .toast { bottom: calc(5.5rem + env(safe-area-inset-bottom)); }

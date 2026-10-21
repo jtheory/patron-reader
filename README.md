@@ -7,7 +7,8 @@ A calm, mobile-first reader for the creators you support on Patreon. Just their 
 - Remembers exactly where you were reading, even after your phone closes the app
 - Listen mode: reads posts aloud with your device's voices, following along paragraph by paragraph (while the app is open)
 - Works offline for posts it has already loaded
-- Light and dark themes, adjustable text size
+- Light and dark themes; tap a chapter for text size and listening controls
+- Pull down on the feed to refresh (it also refreshes on its own when you come back after a while)
 - Installs to your home screen like an app
 
 Personal project; not affiliated with or endorsed by Patreon. It only shows content your own account can already see.
@@ -78,7 +79,7 @@ Pick the final address before installing the app on your phone: your session, se
 
 ## 3. Install it on your phone
 
-1. Set it up on your computer first: open your Worker address, paste your **Patreon session** and **access key** in Settings, and tap **Save and load feed**.
+1. Set it up on your computer first: open your Worker address, paste your **Patreon session** and **access key** in Settings. They save automatically and your feed loads.
 2. On your phone, open the same address **in the browser you'll use the app from** (on Android, Chrome is best). It offers **Scan setup code**.
 3. On the computer, in Settings, tap **Show setup code** under *Set up another device*, and scan it with the phone's **Scan setup code** button. The phone saves both values and loads your feed. Hide the code afterwards: it contains your session.
 

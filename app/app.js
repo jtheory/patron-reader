@@ -402,6 +402,20 @@ function showStatus(msg, { error = false, sticky = false } = {}) {
   if (!sticky) statusTimer = setTimeout(() => (s.hidden = true), 4000);
 }
 
+// Brief, self-dismissing note at the bottom (errors use the status line instead).
+let toastTimer;
+function toast(msg, ms = 2600) {
+  const t = $("toast");
+  clearTimeout(toastTimer);
+  t.textContent = msg;
+  t.hidden = false;
+  requestAnimationFrame(() => t.classList.add("show"));
+  toastTimer = setTimeout(() => {
+    t.classList.remove("show");
+    toastTimer = setTimeout(() => (t.hidden = true), 300);
+  }, ms);
+}
+
 function handleError(e) {
   console.error(e);
   const msg = e instanceof ApiError ? e.message : "Something went wrong while loading. Try refreshing.";
@@ -443,10 +457,24 @@ function route() {
 const scrollMemory = new Map();
 let lastHash = location.hash;
 
+// Which top-bar pieces each screen gets.
+function setBar(r) {
+  const show = {
+    home: r.name === "post",
+    back: r.name === "feed" && !!r.creator,
+    "bar-author": r.name === "post",
+    refresh: r.name !== "settings",
+    "settings-link": r.name === "feed" && !r.creator,
+    close: r.name === "settings",
+  };
+  for (const [id, on] of Object.entries(show)) $(id).hidden = !on;
+  $("bar").classList.toggle("bar-post", r.name === "post");
+}
+
 async function render() {
   const r = route();
-  $("back").hidden = r.name === "feed" && !r.creator;
-  $("refresh").hidden = r.name === "settings";
+  setBar(r);
+  if (r.name !== "post") hideControls();
   if (r.name === "settings") return renderSettings();
   if (r.name === "post") return renderPost(r.id);
   return renderFeed(r.creator);
@@ -581,8 +609,11 @@ async function renderFeed(creatorId) {
 
 // ---------------------------------------------------------------- post view
 
+let current = null; // { post, listenable } for the chapter on screen
+
 async function renderPost(id) {
   view.dataset.view = "post";
+  current = null;
   lastFeedKey = "";
   const p = await getPost(id);
   if (!p) {
@@ -591,9 +622,9 @@ async function renderPost(id) {
   }
   const creators = (await getMeta("creators")) || [];
   const creator = creators.find((c) => c.id === p.campaignId);
-  $("bar-title").textContent = "";
-  $("back").setAttribute("href", "#/c/" + p.campaignId);
-  $("back").textContent = "‹ " + (creator?.name || "Feed");
+  $("bar-author").textContent = creator?.name || "";
+  $("bar-author").setAttribute("href", "#/c/" + p.campaignId);
+  $("bar-title").textContent = p.title;
 
   const article = h("article", { class: "reader" });
   article.append(
@@ -632,18 +663,15 @@ async function renderPost(id) {
       p.url ? h("a", { href: p.url, target: "_blank", rel: "noopener noreferrer" }, "Comments on Patreon") : null
     )
   );
-  const listenable = p.canView && bodyEl.querySelector(".body > p, .body > blockquote, .body > h2, .body > h3, .body > ul, .body > ol");
-  if (listenable && speech) {
-    article.querySelector(".dateline").after(
-      h("button", { class: "listen-btn", type: "button", onclick: () => startListening(p, readerSpot()?.i || 0) },
-        h("span", { "aria-hidden": "true" }, "▶"), " Listen")
-    );
-  }
+  current = {
+    post: p,
+    listenable: !!(speech && p.canView && bodyEl.querySelector(".body > p, .body > blockquote, .body > h2, .body > h3, .body > ul, .body > ol")),
+  };
   view.replaceChildren(article);
   article.addEventListener("click", (e) => {
     if (e.target.closest("a, button, input, select")) return;
     if (String(getSelection()).length) return; // selecting text, not tapping
-    toggleQuick(p);
+    toggleControls();
   });
   if (listening && listening.postId === p.id) attachListening();
 
@@ -717,8 +745,8 @@ function highlight(i, follow = true) {
   }
   if (!follow) return;
   const r = el.getBoundingClientRect();
-  const bar = $("player").getBoundingClientRect().height;
-  if (r.top < barHeight() || r.bottom > innerHeight - bar) {
+  const bottom = controlsOpen() ? $("controls").getBoundingClientRect().height : 0;
+  if (r.top < barHeight() || r.bottom > innerHeight - bottom) {
     pinUntil = 0;
     scrollTo({ top: r.top + scrollY - barHeight() - 16, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   }
@@ -738,97 +766,112 @@ function releaseWake() {
 }
 
 addEventListener("visibilitychange", () => {
-  if (document.visibilityState !== "visible" || !listening) return;
+  if (!listening) return;
+  if (document.visibilityState === "hidden") {
+    // Speech gets cut off in the background: hold our place at the start of
+    // this paragraph so coming back replays it rather than skipping ahead.
+    listening.listener.suspend();
+    return;
+  }
   if (listening.listener.state === "playing") keepAwake();
-  // Speech may have been cut off while we were hidden; pick the sentence back up.
   setTimeout(() => listening?.listener.nudge(), 400);
 });
 
-const RATES = [0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
+const RATES = [0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.8, 2, 2.25, 2.5, 3];
 const rateLabel = (r) => (Number.isInteger(r) ? r + ".0" : String(r)) + "×";
+const PLAY_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>';
+const PAUSE_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor"/></svg>';
 
+const listeningHere = () => listening && current && listening.postId === current.post.id;
+const isPlaying = () => listeningHere() && listening.listener.state === "playing";
+
+// Right-edge buttons: only once listening has started in this chapter.
 function updatePlayer() {
-  const bar = $("player");
-  const l = listening?.listener;
-  if (!l || l.state === "stopped") {
-    bar.hidden = true;
-    document.body.classList.remove("has-player");
-    return;
+  const on = listeningHere() && listening.listener.state !== "stopped";
+  $("audio").hidden = !on;
+  document.body.classList.toggle("has-audio", on);
+  if (on) {
+    $("au-toggle").innerHTML = isPlaying() ? PAUSE_SVG : PLAY_SVG;
+    $("au-toggle").setAttribute("aria-label", isPlaying() ? "Pause" : "Play");
   }
-  bar.hidden = false;
-  document.body.classList.add("has-player");
-  $("pl-title").textContent = listening.title;
-  const playing = l.state === "playing";
-  $("pl-toggle").setAttribute("aria-label", playing ? "Pause" : "Play");
-  $("pl-toggle").innerHTML = playing
-    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor"/></svg>'
-    : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>';
-  $("pl-rate").textContent = rateLabel(settings.rate);
+  updateControls();
 }
 
-$("pl-toggle").addEventListener("click", () => listening?.listener.toggle());
-$("pl-prev").addEventListener("click", () => listening?.listener.jump(-1));
-$("pl-next").addEventListener("click", () => listening?.listener.jump(1));
-$("pl-stop").addEventListener("click", stopListening);
-$("pl-rate").addEventListener("click", () => {
-  const i = RATES.indexOf(settings.rate);
-  settings.rate = RATES[(i + 1) % RATES.length];
-  saveSettings();
-  listening?.listener.setRate(settings.rate);
-  updatePlayer();
-});
+$("au-toggle").addEventListener("click", () => listening?.listener.toggle());
+$("au-prev").addEventListener("click", () => listening?.listener.jump(-1));
+$("au-next").addEventListener("click", () => listening?.listener.jump(1));
 
 // ---------------------------------------------------------------- tap controls
 //
-// In a post, a tap (not a scroll, not on a link) shows a small bar with text
-// size and Listen. It hides after a few seconds, or when you scroll.
+// In a chapter, a tap (not a scroll, not on a link) slides up a bar with
+// play/pause, speed and text size. It hides after a few seconds, or on scroll.
 
-let quickTimer;
-let quickHold = 0; // ignore scrolls we cause ourselves (keeping place on resize)
-function hideQuick() {
-  clearTimeout(quickTimer);
-  $("quick").hidden = true;
+let controlsTimer;
+let controlsHold = 0; // ignore scrolls we cause ourselves (keeping place on resize)
+const controlsOpen = () => $("controls").classList.contains("open");
+
+function updateControls() {
+  const canPlay = !!current?.listenable;
+  $("ct-play").hidden = !canPlay;
+  $("ct-play").innerHTML = (isPlaying() ? PAUSE_SVG : PLAY_SVG) + `<span>${isPlaying() ? "Pause" : "Listen"}</span>`;
+  $("ct-rate").textContent = rateLabel(settings.rate);
+  $("ct-slower").disabled = settings.rate <= RATES[0];
+  $("ct-faster").disabled = settings.rate >= RATES.at(-1);
 }
-function armQuickHide() {
-  clearTimeout(quickTimer);
-  quickTimer = setTimeout(hideQuick, 4000);
+
+function showControls() {
+  updateControls();
+  const c = $("controls");
+  c.classList.add("open");
+  c.setAttribute("aria-hidden", "false");
+  document.body.classList.add("has-controls");
+  armControlsHide();
 }
-function toggleQuick(p) {
-  const bar = $("quick");
-  if (!bar.hidden) return hideQuick();
-  const playing = listening?.postId === p.id;
-  const size = (label, delta, name) =>
-    h("button", {
-      class: "q-btn",
-      type: "button",
-      "aria-label": name,
-      onclick: () => {
-        // Keep the same paragraph at the top while the text reflows.
-        const spot = readerSpot();
-        settings.size = Math.min(1.6, Math.max(0.95, +(settings.size + delta).toFixed(4)));
-        saveSettings();
-        applyLook();
-        quickHold = Date.now() + 500;
-        if (spot) scrollToSpot(spot);
-        armQuickHide();
-      },
-    }, label);
-  const items = [
-    h("div", { class: "q-group", role: "group", "aria-label": "Text size" }, size("A−", -0.0625, "Smaller text"), size("A+", 0.0625, "Larger text")),
-  ];
-  if (p.canView && speech && !playing) {
-    items.push(
-      h("button", { class: "q-listen", type: "button", onclick: () => { hideQuick(); startListening(p, readerSpot()?.i || 0); } },
-        h("span", { "aria-hidden": "true" }, "▶"), " Listen")
-    );
-  }
-  bar.replaceChildren(...items);
-  bar.hidden = false;
-  armQuickHide();
+function hideControls() {
+  clearTimeout(controlsTimer);
+  const c = $("controls");
+  c.classList.remove("open");
+  c.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("has-controls");
 }
-addEventListener("hashchange", hideQuick);
+function toggleControls() {
+  controlsOpen() ? hideControls() : showControls();
+}
+function armControlsHide() {
+  clearTimeout(controlsTimer);
+  controlsTimer = setTimeout(hideControls, 4000);
+}
+
+$("ct-play").addEventListener("click", () => {
+  if (!current) return;
+  if (listeningHere()) listening.listener.toggle();
+  else startListening(current.post, readerSpot()?.i || 0);
+  hideControls();
+});
+const stepRate = (dir) => {
+  const i = RATES.findIndex((r) => r >= settings.rate - 1e-9);
+  settings.rate = RATES[Math.max(0, Math.min(RATES.length - 1, (i < 0 ? RATES.length - 1 : i) + dir))];
+  saveSettings();
+  listening?.listener.setRate(settings.rate);
+  updateControls();
+  armControlsHide();
+};
+$("ct-slower").addEventListener("click", () => stepRate(-1));
+$("ct-faster").addEventListener("click", () => stepRate(1));
+const stepSize = (delta) => {
+  const spot = readerSpot(); // keep the same paragraph at the top while text reflows
+  settings.size = Math.min(1.6, Math.max(0.95, +(settings.size + delta).toFixed(4)));
+  saveSettings();
+  applyLook();
+  controlsHold = Date.now() + 500;
+  if (spot) scrollToSpot(spot);
+  armControlsHide();
+};
+$("ct-smaller").addEventListener("click", () => stepSize(-0.0625));
+$("ct-larger").addEventListener("click", () => stepSize(0.0625));
+
 addEventListener("scroll", () => {
-  if (!$("quick").hidden && Date.now() > pinUntil && Date.now() > quickHold) hideQuick();
+  if (controlsOpen() && Date.now() > pinUntil && Date.now() > controlsHold) hideControls();
 }, { passive: true });
 
 // ---------------------------------------------------------------- position memory
@@ -910,12 +953,9 @@ function renderSettings() {
   view.dataset.view = "settings";
   lastFeedKey = "";
   $("bar-title").textContent = "Settings";
-  $("back").setAttribute("href", "#/");
-  $("back").textContent = "‹ Feed";
 
   const session = h("input", { id: "f-session", type: "password", autocomplete: "off", spellcheck: "false", value: settings.session });
   const key = h("input", { id: "f-key", type: "password", autocomplete: "off", spellcheck: "false", value: settings.key });
-  const base = h("input", { id: "f-base", type: "text", autocomplete: "off", spellcheck: "false", placeholder: "Same as this page", value: settings.base });
   const paidOnly = h("input", { id: "f-paid", type: "checkbox", checked: settings.paidOnly });
   const hideLocked = h("input", { id: "f-locked", type: "checkbox", checked: settings.hideLocked });
   const voice = h("select", { id: "f-voice" }, h("option", { value: "" }, "Device default"));
@@ -936,37 +976,44 @@ function renderSettings() {
     { id: "f-theme" },
     [["auto", "Match device"], ["light", "Light"], ["dark", "Dark"]].map(([v, l]) => h("option", { value: v, selected: settings.theme === v }, l))
   );
-  const err = h("p", { class: "form-error", role: "alert", hidden: true });
+
+  // Every change saves straight away. A new session or key also reloads the feed.
+  const save = () => {
+    const newSession = session.value.trim().replace(/^session_id=/, "").replace(/;.*$/, "");
+    const newKey = key.value.trim();
+    const changedAuth = newSession !== settings.session || newKey !== settings.key;
+    Object.assign(settings, {
+      session: newSession,
+      key: newKey,
+      paidOnly: paidOnly.checked,
+      hideLocked: hideLocked.checked,
+      theme: theme.value,
+      voice: voice.value,
+    });
+    saveSettings();
+    applyLook();
+    lastFeedKey = "";
+    if (changedAuth && settings.session && settings.key) {
+      toast("Saved. Loading your feed…");
+      sync().then(() => toast("Feed loaded."), handleError);
+    }
+  };
+  let typing;
+  for (const el of [session, key]) {
+    el.addEventListener("input", () => {
+      clearTimeout(typing);
+      typing = setTimeout(save, 700);
+    });
+    el.addEventListener("change", () => {
+      clearTimeout(typing);
+      save();
+    });
+  }
+  for (const el of [paidOnly, hideLocked, theme, voice]) el.addEventListener("change", save);
 
   const form = h(
     "form",
-    {
-      class: "settings",
-      onsubmit: async (ev) => {
-        ev.preventDefault();
-        const newSession = session.value.trim().replace(/^session_id=/, "").replace(/;.*$/, "");
-        const changedAuth = newSession !== settings.session || key.value.trim() !== settings.key;
-        Object.assign(settings, {
-          session: newSession,
-          key: key.value.trim(),
-          base: base.value.trim(),
-          paidOnly: paidOnly.checked,
-          hideLocked: hideLocked.checked,
-          theme: theme.value,
-          voice: voice.value,
-        });
-        saveSettings();
-        applyLook();
-        if (!settings.session || !settings.key) {
-          err.textContent = "Both the Patreon session and the access key are needed to load your feed.";
-          err.hidden = false;
-          return;
-        }
-        showStatus(null);
-        location.hash = "#/";
-        if (changedAuth) sync().catch(handleError);
-      },
-    },
+    { class: "settings", onsubmit: (ev) => ev.preventDefault() },
     h("h2", {}, "Connect to Patreon"),
     h("p", { class: "lede" }, "Both values stay on this device. They're sent only to your own proxy, which passes the session on to Patreon."),
     h(
@@ -999,39 +1046,10 @@ function renderSettings() {
     h("div", { class: "field" }, h("label", { class: "check" }, hideLocked, h("span", {}, "Hide posts my tier doesn't include"))),
     h("div", { class: "field" }, h("label", { for: "f-theme" }, "Appearance"), theme),
     speech
-      ? [
-          h("div", { class: "field" }, h("label", { for: "f-voice" }, "Listening voice"), voice,
-            h("p", { class: "hint" }, "More voices: Android Settings › Accessibility › Text-to-speech output.")),
-        ]
+      ? h("div", { class: "field" }, h("label", { for: "f-voice" }, "Listening voice"), voice,
+          h("p", { class: "hint" }, "More voices: Android Settings › Accessibility › Text-to-speech output."))
       : null,
-    h(
-      "details",
-      { class: "field" },
-      h("summary", {}, "Advanced"),
-      h("div", { class: "field", style: "margin-top:.75rem" }, h("label", { for: "f-base" }, "Proxy address"), base, h("p", { class: "hint" }, "Only needed if the proxy runs somewhere other than this page."))
-    ),
-    h("button", { class: "primary", type: "submit" }, "Save and load feed"),
-    h(
-      "button",
-      {
-        class: "secondary",
-        type: "button",
-        onclick: async () => {
-          await idb("posts", "readwrite", (s) => s.clear());
-          await idb("bodies", "readwrite", (s) => s.clear());
-          await idb("meta", "readwrite", (s) => s.clear());
-          readSet = {};
-          progress = {};
-          LS.set("read", readSet);
-          LS.set("progress", progress);
-          showStatus("Cleared saved posts and reading history.");
-        },
-      },
-      "Clear saved posts"
-    ),
-    h("button", { class: "secondary", type: "button", onclick: () => location.reload() }, "Reload app"),
-    settings.session ? signOutButton() : null,
-    err
+    settings.session ? signOutButton() : null
   );
   // A new device most likely wants to scan; one that's set up offers its code.
   if (settings.session && settings.key) view.replaceChildren(form, deviceSection());
@@ -1081,8 +1099,9 @@ function applySetup(text) {
     const changed = d.s !== settings.session || d.k !== settings.key;
     Object.assign(settings, { session: d.s, key: d.k, base: d.b || "" });
     saveSettings();
-    showStatus("This device is set up. Loading your feed…");
-    if (changed) sync().then(() => showStatus("Up to date."), handleError);
+    showStatus(null);
+    toast("This device is set up. Loading your feed…");
+    if (changed) sync().then(() => toast("Feed loaded."), handleError);
     return true;
   } catch {
     showStatus("That setup code is damaged. Show a fresh code on your other device and try again.", { error: true, sticky: true });
@@ -1237,10 +1256,52 @@ function deviceSection() {
 
 // ---------------------------------------------------------------- start
 
-$("refresh").addEventListener("click", () => {
+function refreshNow() {
   showStatus(null);
-  sync().then(() => showStatus("Up to date."), handleError);
-});
+  return sync().then(() => toast("Up to date."), handleError);
+}
+$("refresh").addEventListener("click", refreshNow);
+
+// Coming back to the app after a while also refreshes.
+const STALE = 10 * 60 * 1000;
+async function refreshIfStale() {
+  if (!settings.session || !settings.key) return;
+  if (Date.now() - ((await getMeta("lastSync")) || 0) > STALE) sync().catch(handleError);
+}
+addEventListener("visibilitychange", () => document.visibilityState === "visible" && refreshIfStale());
+
+// Pull down at the top of the feed to refresh.
+{
+  const ptr = $("ptr");
+  const THRESHOLD = 70;
+  let startY = null;
+  let pull = 0;
+  const reset = () => {
+    startY = null;
+    pull = 0;
+    ptr.style.transform = "";
+    ptr.classList.remove("ready", "pulling");
+  };
+  addEventListener("touchstart", (e) => {
+    if (view.dataset.view === "feed" && scrollY <= 0 && !syncing) startY = e.touches[0].clientY;
+  }, { passive: true });
+  addEventListener("touchmove", (e) => {
+    if (startY == null) return;
+    pull = Math.max(0, e.touches[0].clientY - startY);
+    if (pull <= 0 || scrollY > 0) return;
+    const d = Math.min(pull * 0.5, THRESHOLD * 0.9);
+    ptr.classList.add("pulling");
+    ptr.classList.toggle("ready", pull * 0.5 >= THRESHOLD * 0.75);
+    ptr.style.transform = `translate(-50%, ${d}px) rotate(${pull * 2}deg)`;
+  }, { passive: true });
+  addEventListener("touchend", () => {
+    if (startY == null) return;
+    const go = ptr.classList.contains("ready");
+    reset();
+    if (go) refreshNow();
+  });
+  addEventListener("touchcancel", reset);
+}
 
 applyLook();
 takeConnectLink();
@@ -1257,12 +1318,20 @@ if (here && here.hash === (location.hash || "#/") && route().name !== "post" && 
   requestAnimationFrame(() => scrollTo(0, here.y));
 }
 
-if (settings.session && settings.key) {
-  const last = (await getMeta("lastSync")) || 0;
-  if (Date.now() - last > 10 * 60 * 1000) sync().catch(handleError);
-} else if (route().name !== "settings") {
-  location.hash = "#/settings";
-}
+if (settings.session && settings.key) refreshIfStale();
+else if (route().name !== "settings") location.hash = "#/settings";
+
+// "App updated": fingerprint our own code; if it changed since last launch, say so.
+(async () => {
+  try {
+    const parts = await Promise.all(["app.js", "listen.js", "style.css", "index.html"].map((f) => fetch(f, { cache: "no-cache" }).then((r) => r.text())));
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(parts.join("\n")));
+    const build = [...new Uint8Array(digest)].slice(0, 8).map((b) => b.toString(16).padStart(2, "0")).join("");
+    const seen = LS.get("build", null);
+    if (seen && seen !== build) toast("App updated.");
+    LS.set("build", build);
+  } catch {}
+})();
 
 if ("serviceWorker" in navigator && location.protocol === "https:") {
   navigator.serviceWorker.register("sw.js").catch(() => {});

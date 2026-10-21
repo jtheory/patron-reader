@@ -16,8 +16,14 @@
 </head>
 <body>
   <header class="bar" id="bar">
-    <a class="bar-back" id="back" href="#/" hidden aria-label="Back to feed">‹ Feed</a>
-    <h1 class="bar-title" id="bar-title">Patron Reader</h1>
+    <a class="icon-btn" id="home" href="#/" aria-label="Feed" title="Feed" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-6.5 8 6.5M6.5 9.5V19h4.5v-5h2v5h4.5V9.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
+    <a class="bar-back" id="back" href="#/" hidden>‹ All</a>
+    <div class="bar-text">
+      <a class="bar-author" id="bar-author" href="#/" hidden></a>
+      <h1 class="bar-title" id="bar-title">Patron Reader</h1>
+    </div>
     <div class="bar-actions">
       <button class="icon-btn" id="refresh" aria-label="Refresh" title="Refresh">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -25,27 +31,43 @@
       <a class="icon-btn" id="settings-link" href="#/settings" aria-label="Settings" title="Settings">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="16" cy="7" r="2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="8" cy="17" r="2" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
       </a>
+      <a class="icon-btn" id="close" href="#/" aria-label="Close settings" title="Close" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </a>
     </div>
   </header>
+  <div class="ptr" id="ptr" aria-hidden="true">
+    <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </div>
   <div class="status" id="status" role="status" aria-live="polite" hidden></div>
   <main id="view"></main>
-  <div class="quick" id="quick" hidden></div>
-  <div class="player" id="player" role="region" aria-label="Listening" hidden>
-    <div class="pl-title" id="pl-title"></div>
-    <div class="pl-controls">
-      <button class="pl-btn" id="pl-prev" aria-label="Previous paragraph">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 6v12M18 6.5v11L9.5 12z" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-      </button>
-      <button class="pl-btn pl-main" id="pl-toggle" aria-label="Pause"></button>
-      <button class="pl-btn" id="pl-next" aria-label="Next paragraph">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 6v12M6 6.5v11l8.5-5.5z" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-      </button>
-      <button class="pl-rate" id="pl-rate" aria-label="Speed">1.0×</button>
-      <button class="pl-btn" id="pl-stop" aria-label="Stop listening">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-      </button>
+
+  <!-- Shown once listening has started in this chapter. -->
+  <div class="audio" id="audio" role="group" aria-label="Listening" hidden>
+    <button class="au-btn" id="au-prev" aria-label="Previous paragraph">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <button class="au-btn au-main" id="au-toggle" aria-label="Pause"></button>
+    <button class="au-btn" id="au-next" aria-label="Next paragraph">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+  </div>
+
+  <!-- Slides up when you tap a chapter. -->
+  <div class="controls" id="controls" role="toolbar" aria-label="Reading controls" aria-hidden="true">
+    <button class="ct-play" id="ct-play" type="button"></button>
+    <div class="ct-group" role="group" aria-label="Speed">
+      <button class="ct-btn" id="ct-slower" type="button" aria-label="Slower">−</button>
+      <span class="ct-value" id="ct-rate"></span>
+      <button class="ct-btn" id="ct-faster" type="button" aria-label="Faster">+</button>
+    </div>
+    <div class="ct-group" role="group" aria-label="Text size">
+      <button class="ct-btn ct-a" id="ct-smaller" type="button" aria-label="Smaller text">A−</button>
+      <button class="ct-btn ct-a" id="ct-larger" type="button" aria-label="Larger text">A+</button>
     </div>
   </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
   <script src="app.js" type="module"></script>
 </body>
 </html>

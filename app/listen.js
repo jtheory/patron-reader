@@ -96,6 +96,7 @@ export class Listener {
 
   play() {
     if (!this.blocks.length) return;
+    this.suspended = false;
     this.engine.cancel();
     const gen = ++this.gen;
     this.setState("playing");
@@ -136,6 +137,8 @@ export class Listener {
 
   pause() {
     if (this.state !== "playing") return;
+    if (this.suspended) this.part = 0;
+    this.suspended = false;
     this.gen++;
     this.engine.cancel();
     this.setState("paused");
@@ -146,9 +149,27 @@ export class Listener {
     else this.play();
   }
 
-  // Resume the current sentence if the engine went quiet (e.g. after the
-  // app was in the background).
+  // The app went to the background: engines often report the cut-off sentence
+  // as *finished*, which would skip ahead. So stop listening to the engine now
+  // and rewind to the start of the current paragraph; resume() picks up there.
+  suspend() {
+    if (this.state !== "playing") return;
+    this.gen++;
+    this.part = 0;
+    this.suspended = true;
+    this.engine.cancel();
+  }
+
+  resume() {
+    if (this.suspended && this.state === "playing") {
+      this.suspended = false;
+      this.play();
+    }
+  }
+
+  // Resume the current sentence if the engine went quiet unexpectedly.
   nudge() {
+    if (this.suspended) return this.resume();
     if (this.state === "playing" && !this.engine.speaking()) this.play();
   }
 
