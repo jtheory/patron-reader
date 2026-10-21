@@ -8,7 +8,7 @@ const DEFAULTS = {
   session: "",       // Patreon session_id cookie value
   key: "",           // X-Proxy-Key for the Worker
   base: "",          // proxy origin; "" = same origin as this app
-  hideLocked: false,
+  hideLocked: true,
   paidOnly: false,
   theme: "auto",
   size: 1.1875,      // reader font size, rem
@@ -68,6 +68,24 @@ const setMeta = (k, v) => idb("meta", "readwrite", (s) => s.put(v, k));
 const allPosts = () => idb("posts", "readonly", (s) => s.getAll());
 const getPost = (id) => idb("posts", "readonly", (s) => s.get(id));
 const getBody = (id) => idb("bodies", "readonly", (s) => s.get(id));
+
+// Patreon has no "unlocked on" date, so detect it ourselves: a post we saved
+// as locked that now comes back readable was unlocked just now. It jumps to
+// the top of the feed (sorted by unlock time) and counts as unread again.
+async function mergeAndSave(items) {
+  const now = new Date().toISOString();
+  for (const it of items) {
+    const old = await getPost(it.meta.id);
+    if (old?.unlockedAt) it.meta.unlockedAt = old.unlockedAt;
+    else if (old && !old.canView && it.meta.canView) {
+      it.meta.unlockedAt = now;
+      delete readSet[it.meta.id];
+      LS.set("read", readSet);
+    }
+  }
+  await savePosts(items);
+}
+const sortKey = (p) => p.unlockedAt || p.published || "";
 
 async function savePosts(items) {
   await new Promise((resolve, reject) => {
@@ -212,7 +230,7 @@ async function doSync() {
   const errors = await pool(creators, 4, async (c) => {
     const r = await api(postsPath(c.id));
     const items = (r.data || []).map((p) => shapePost(p, c.id));
-    await savePosts(items);
+    await mergeAndSave(items);
     // Keep the oldest page's cursor; a refresh only fetches the newest page.
     if (!(c.id in cursors)) cursors[c.id] = toPath(r.links?.next) || null;
     if (firstRun) {
@@ -233,7 +251,7 @@ async function loadMore(campaignId) {
   const next = cursors[campaignId];
   if (!next) return false;
   const r = await api(next);
-  await savePosts((r.data || []).map((p) => shapePost(p, campaignId)));
+  await mergeAndSave((r.data || []).map((p) => shapePost(p, campaignId)));
   cursors[campaignId] = toPath(r.links?.next) || null;
   await setMeta("cursors", cursors);
   return true;
@@ -405,6 +423,7 @@ function dayLabel(iso) {
   if (d.getFullYear() !== today.getFullYear()) opts.year = "numeric";
   return d.toLocaleDateString(undefined, opts);
 }
+const fmtDate = (iso) => new Date(iso).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 const minutes = (w) => Math.max(1, Math.round(w / 250));
 
 // ---------------------------------------------------------------- routing
@@ -462,7 +481,7 @@ async function renderFeed(creatorId) {
   const unreadBy = {};
   for (const p of posts) if (!readSet[p.id] && p.canView) unreadBy[p.campaignId] = (unreadBy[p.campaignId] || 0) + 1;
   if (creator) posts = posts.filter((p) => p.campaignId === creator.id);
-  posts.sort((a, b) => (b.published || "").localeCompare(a.published || ""));
+  posts.sort((a, b) => sortKey(b).localeCompare(sortKey(a)));
 
   // Avoid rebuilding (and losing scroll) when a background sync changes nothing visible.
   const key = JSON.stringify([creatorId, posts.map((p) => p.id + (readSet[p.id] ? "r" : "")), unreadBy, settings.paidOnly]);
@@ -494,7 +513,7 @@ async function renderFeed(creatorId) {
   let currentDay = null;
   let list = null;
   for (const p of posts) {
-    const day = dayLabel(p.published);
+    const day = dayLabel(sortKey(p));
     if (day !== currentDay) {
       currentDay = day;
       body.push(h("h2", { class: "day" }, day));
@@ -503,13 +522,13 @@ async function renderFeed(creatorId) {
     }
     const unread = p.canView && !readSet[p.id];
     const prog = pctOf(p.id);
+    const fresh = p.unlockedAt ? "Unlocked" : "";
+    const len = p.words > 40 ? minutes(p.words) + " min" : "";
     const right = !p.canView
       ? "Locked"
       : prog > 0.02 && prog < 0.95
         ? h("span", { class: "progress" }, Math.round(prog * 100) + "% read")
-        : p.words > 40
-          ? minutes(p.words) + " min"
-          : "";
+        : [fresh, len].filter(Boolean).join(", ");
     list.append(
       h(
         "li",
@@ -571,7 +590,7 @@ async function renderPost(id) {
   article.append(
     h("a", { class: "running-head", href: "#/c/" + p.campaignId }, creator?.name || ""),
     h("h1", {}, p.title),
-    h("p", { class: "dateline" }, new Date(p.published).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" }) + (p.words > 40 && p.canView ? `, ${minutes(p.words)} min read` : ""))
+    h("p", { class: "dateline" }, fmtDate(p.published) + (p.unlockedAt ? `, unlocked ${fmtDate(p.unlockedAt)}` : "") + (p.words > 40 && p.canView ? `, ${minutes(p.words)} min read` : ""))
   );
 
   const bodyEl = h("div", { class: "body" });
