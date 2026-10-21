@@ -623,24 +623,13 @@ async function renderPost(id) {
   const newer = siblings.slice(i + 1).find((x) => x.canView);
   const older = siblings.slice(0, i).reverse().find((x) => x.canView);
 
-  const sizeBtn = (label, delta, name) =>
-    h("button", {
-      "aria-label": name,
-      onclick: () => {
-        settings.size = Math.min(1.6, Math.max(0.95, +(settings.size + delta).toFixed(4)));
-        saveSettings();
-        applyLook();
-      },
-    }, label);
-
   article.append(
     h(
       "footer",
       { class: "reader-end" },
       newer ? h("a", { class: "next", href: "#/p/" + newer.id }, "Next: " + newer.title) : h("a", { href: "#/" }, "Back to the feed"),
       older ? h("a", { href: "#/p/" + older.id }, "Previous") : null,
-      p.url ? h("a", { href: p.url, target: "_blank", rel: "noopener noreferrer" }, "Comments on Patreon") : null,
-      h("span", { class: "size-controls", role: "group", "aria-label": "Text size" }, sizeBtn("A−", -0.0625, "Smaller text"), sizeBtn("A+", 0.0625, "Larger text"))
+      p.url ? h("a", { href: p.url, target: "_blank", rel: "noopener noreferrer" }, "Comments on Patreon") : null
     )
   );
   const listenable = p.canView && bodyEl.querySelector(".body > p, .body > blockquote, .body > h2, .body > h3, .body > ul, .body > ol");
@@ -651,6 +640,11 @@ async function renderPost(id) {
     );
   }
   view.replaceChildren(article);
+  article.addEventListener("click", (e) => {
+    if (e.target.closest("a, button, input, select")) return;
+    if (String(getSelection()).length) return; // selecting text, not tapping
+    toggleQuick(p);
+  });
   if (listening && listening.postId === p.id) attachListening();
 
   if (p.canView && !readSet[id]) {
@@ -783,6 +777,59 @@ $("pl-rate").addEventListener("click", () => {
   listening?.listener.setRate(settings.rate);
   updatePlayer();
 });
+
+// ---------------------------------------------------------------- tap controls
+//
+// In a post, a tap (not a scroll, not on a link) shows a small bar with text
+// size and Listen. It hides after a few seconds, or when you scroll.
+
+let quickTimer;
+let quickHold = 0; // ignore scrolls we cause ourselves (keeping place on resize)
+function hideQuick() {
+  clearTimeout(quickTimer);
+  $("quick").hidden = true;
+}
+function armQuickHide() {
+  clearTimeout(quickTimer);
+  quickTimer = setTimeout(hideQuick, 4000);
+}
+function toggleQuick(p) {
+  const bar = $("quick");
+  if (!bar.hidden) return hideQuick();
+  const playing = listening?.postId === p.id;
+  const size = (label, delta, name) =>
+    h("button", {
+      class: "q-btn",
+      type: "button",
+      "aria-label": name,
+      onclick: () => {
+        // Keep the same paragraph at the top while the text reflows.
+        const spot = readerSpot();
+        settings.size = Math.min(1.6, Math.max(0.95, +(settings.size + delta).toFixed(4)));
+        saveSettings();
+        applyLook();
+        quickHold = Date.now() + 500;
+        if (spot) scrollToSpot(spot);
+        armQuickHide();
+      },
+    }, label);
+  const items = [
+    h("div", { class: "q-group", role: "group", "aria-label": "Text size" }, size("A−", -0.0625, "Smaller text"), size("A+", 0.0625, "Larger text")),
+  ];
+  if (p.canView && speech && !playing) {
+    items.push(
+      h("button", { class: "q-listen", type: "button", onclick: () => { hideQuick(); startListening(p, readerSpot()?.i || 0); } },
+        h("span", { "aria-hidden": "true" }, "▶"), " Listen")
+    );
+  }
+  bar.replaceChildren(...items);
+  bar.hidden = false;
+  armQuickHide();
+}
+addEventListener("hashchange", hideQuick);
+addEventListener("scroll", () => {
+  if (!$("quick").hidden && Date.now() > pinUntil && Date.now() > quickHold) hideQuick();
+}, { passive: true });
 
 // ---------------------------------------------------------------- position memory
 //
@@ -982,6 +1029,7 @@ function renderSettings() {
       },
       "Clear saved posts"
     ),
+    h("button", { class: "secondary", type: "button", onclick: () => location.reload() }, "Reload app"),
     settings.session ? signOutButton() : null,
     err
   );

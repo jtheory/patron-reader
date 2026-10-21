@@ -470,3 +470,50 @@ main { max-width: calc(var(--measure) + 2 * var(--gutter)); margin: 0 auto; }
 }
 body.has-player { padding-bottom: calc(7rem + env(safe-area-inset-bottom)); }
 .secondary.danger { color: var(--error); border-color: currentColor; margin: .75rem 0 0; display: block; }
+
+/* ---------- tap controls ---------- */
+
+body { touch-action: manipulation; } /* no double-tap zoom delay on taps */
+.quick {
+  position: fixed;
+  left: 50%;
+  bottom: calc(1.25rem + env(safe-area-inset-bottom));
+  z-index: 7;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .4rem;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--paper);
+  box-shadow: 0 6px 24px rgba(20, 28, 25, .18);
+}
+body.has-player .quick { bottom: calc(7.25rem + env(safe-area-inset-bottom)); }
+.q-group { display: flex; }
+.q-btn, .q-listen {
+  height: 2.75rem;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+.q-btn { min-width: 3rem; font-size: 1.0625rem; }
+.q-btn + .q-btn { border-left: 1px solid var(--rule); border-radius: 0 999px 999px 0; }
+.q-group .q-btn:first-child { border-radius: 999px 0 0 999px; }
+.q-listen {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  padding: 0 1.1rem;
+  background: var(--accent);
+  color: var(--paper);
+}
+.q-listen span { font-size: .7em; }
+.q-btn:active { background: var(--wash); }
+@media (prefers-reduced-motion: no-preference) {
+  .quick:not([hidden]) { animation: quick-in .16s ease-out; }
+  @keyframes quick-in { from { opacity: 0; transform: translate(-50%, .5rem); } }
+}
+.settings .secondary + .secondary.danger { margin-top: .75rem; }

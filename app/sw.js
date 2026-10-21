@@ -1,5 +1,5 @@
 // Offline app shell. Posts live in IndexedDB; API calls are never cached here.
-const VERSION = "pr-v4";
+const VERSION = "pr-v5";
 const SHELL = ["./", "index.html", "style.css", "app.js", "manifest.webmanifest", "icon.svg", "icon-180.png", "icon-192.png", "listen.js"];
 
 self.addEventListener("install", (e) => {
@@ -16,7 +16,8 @@ self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET" || url.origin !== location.origin || url.pathname.startsWith("/api/")) return;
   // Network first so updates arrive promptly; fall back to cache when offline.
   e.respondWith(
-    fetch(e.request)
+    // no-cache: always revalidate with the server (cheap 304 if unchanged).
+    fetch(e.request, { cache: "no-cache" })
       .then((res) => {
         const copy = res.clone();
         if (res.ok) caches.open(VERSION).then((c) => c.put(e.request, copy));
