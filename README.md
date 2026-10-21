@@ -24,6 +24,12 @@ SESSION_ID=... node scripts/smoke-test.mjs
 
 It checks: the session works → which creators you support → whether the latest patron-only posts are readable.
 
+If it can't find your creators, test post reading for one creator by hand: open their Patreon page with DevTools → Network, filter on `campaign_id`, and copy the number from a `/api/posts?filter[campaign_id]=…` request. Then:
+
+```sh
+SESSION_ID=... CAMPAIGN_ID=12345 node scripts/smoke-test.mjs
+```
+
 ## Step 2: run the Worker
 
 ```sh

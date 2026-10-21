@@ -53,27 +53,50 @@ const strip = (html) => (html || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " 
 try {
   console.log(`Mode: ${viaProxy ? "via Worker " + base : "direct to patreon.com"}\n`);
 
-  // 1 + 2: who am I, and what do I support
-  const me = await api(
-    "/api/current_user?" +
-      qs({
-        include: "memberships.campaign",
-        "fields[user]": "full_name",
-        "fields[member]": "patron_status",
-        "fields[campaign]": "name,url",
-        "json-api-version": "1.0",
-      })
-  );
-  console.log(`✓ Session OK — logged in as ${me.data?.attributes?.full_name ?? "(name hidden)"}`);
-
-  const campaigns = (me.included || []).filter((x) => x.type === "campaign");
-  if (!campaigns.length) {
-    console.log("! No campaigns found in memberships; dumping keys for debugging:");
-    console.log(JSON.stringify(me, null, 2).slice(0, 1500));
-    process.exit(0);
+  // 1 + 2: who am I, and what do I support.
+  // The website's internal API has used several names for "creators I support";
+  // try each and keep the first that yields campaigns.
+  const candidates = [
+    "active_memberships.campaign",
+    "pledges.campaign",
+    "memberships.campaign",
+    "campaign_memberships.campaign",
+  ];
+  let me = null;
+  let campaigns = [];
+  let worked = null;
+  for (const include of candidates) {
+    try {
+      const r = await api(
+        "/api/current_user?" +
+          qs({ include, "fields[campaign]": "name,url", "json-api-version": "1.0" })
+      );
+      me = me || r;
+      const found = (r.included || []).filter((x) => x.type === "campaign");
+      console.log(`  include=${include}: ${found.length} campaign(s)`);
+      if (found.length && !worked) {
+        campaigns = found;
+        worked = include;
+      }
+    } catch (e) {
+      console.log(`  include=${include}: error ${e.message.split("\n")[0]}`);
+    }
   }
-  console.log(`✓ Supporting ${campaigns.length} creator(s):`);
-  for (const c of campaigns) console.log(`   - ${c.attributes?.name} [${c.id}]`);
+  if (!me) throw new Error("No /api/current_user variant worked");
+  console.log(`\n✓ Session OK — logged in as ${me.data?.attributes?.full_name ?? "(name hidden)"}`);
+
+  if (process.env.CAMPAIGN_ID) {
+    campaigns = [{ id: process.env.CAMPAIGN_ID, attributes: { name: `campaign ${process.env.CAMPAIGN_ID}` } }];
+    console.log(`  (using CAMPAIGN_ID=${process.env.CAMPAIGN_ID} from env)`);
+  } else if (!campaigns.length) {
+    console.log("! No variant returned campaigns. Relationship keys seen on the user:");
+    console.log("  " + Object.keys(me.data?.relationships || {}).join(", "));
+    console.log("  Workaround: rerun with CAMPAIGN_ID=<id> to test post reading (see README).");
+    process.exit(0);
+  } else {
+    console.log(`✓ Supporting ${campaigns.length} creator(s) (via ${worked}):`);
+    for (const c of campaigns) console.log(`   - ${c.attributes?.name} [${c.id}]`);
+  }
 
   // 3: latest posts from the first campaign
   const c = campaigns[0];
