@@ -1,0 +1,10 @@
+name = "patron-reader"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+# Comma-separated origins allowed to call the proxy (your PWA's URL(s)).
+ALLOWED_ORIGINS = "http://localhost:5173"
+
+# Secret, set with:  npx wrangler secret put PROXY_KEY
+# For `wrangler dev`, put PROXY_KEY=... in worker/.dev.vars (gitignored).
