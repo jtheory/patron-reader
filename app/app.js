@@ -1,3 +1,5 @@
+import { webSpeechEngine, Listener } from "./listen.js";
+
 // Patron Reader — a quiet feed of the creators you support on Patreon.
 // No build step, no dependencies. Data flow:
 //   settings (localStorage) → api() via the Worker proxy → IndexedDB cache → views.
@@ -12,6 +14,8 @@ const DEFAULTS = {
   paidOnly: false,
   theme: "auto",
   size: 1.1875,      // reader font size, rem
+  rate: 1,           // listening speed
+  voice: "",         // voice id; "" = device default
 };
 const LS = {
   get(k, d) {
@@ -454,6 +458,7 @@ addEventListener("hashchange", () => {
     return;
   }
   scrollMemory.set(lastHash, scrollY);
+  if (listening && location.hash !== "#/p/" + listening.postId) stopListening();
   if (lastHash.startsWith("#/p/")) {
     const id = lastHash.slice(4);
     const spot = progress[id];
@@ -638,7 +643,15 @@ async function renderPost(id) {
       h("span", { class: "size-controls", role: "group", "aria-label": "Text size" }, sizeBtn("A−", -0.0625, "Smaller text"), sizeBtn("A+", 0.0625, "Larger text"))
     )
   );
+  const listenable = p.canView && bodyEl.querySelector(".body > p, .body > blockquote, .body > h2, .body > h3, .body > ul, .body > ol");
+  if (listenable && speech) {
+    article.querySelector(".dateline").after(
+      h("button", { class: "listen-btn", type: "button", onclick: () => startListening(p, readerSpot()?.i || 0) },
+        h("span", { "aria-hidden": "true" }, "▶"), " Listen")
+    );
+  }
   view.replaceChildren(article);
+  if (listening && listening.postId === p.id) attachListening();
 
   if (p.canView && !readSet[id]) {
     readSet[id] = 1;
@@ -649,6 +662,127 @@ async function renderPost(id) {
   const saved = progress[id];
   restoreReader(typeof saved === "object" && saved.pct < 0.97 ? saved : null);
 }
+
+// ---------------------------------------------------------------- listening
+
+const speech = webSpeechEngine();
+let listening = null;     // { postId, listener }
+let wakeLock = null;
+
+const blockEls = () => [...(view.querySelector(".body")?.children || [])];
+
+function startListening(p, index) {
+  stopListening();
+  const listener = new Listener(speech, {
+    onIndex: (i) => highlight(i),
+    onState: (st) => {
+      updatePlayer();
+      if (st === "playing") keepAwake();
+      else releaseWake();
+      if (st === "stopped" && listening?.listener === listener) clearHighlight();
+    },
+    // Stop at the end of the post. (No auto-continue: a creator's next post
+    // isn't necessarily the next chapter of the same story.)
+    onFinish: () => stopListening(),
+  });
+  listener.rate = settings.rate;
+  listener.voice = settings.voice;
+  listening = { postId: p.id, title: p.title, listener };
+  listener.start(blockEls().map((el) => (el.tagName === "IMG" || el.tagName === "HR" ? "" : el.textContent)), index);
+}
+
+// Re-render of the same post while listening: point the highlight at the new DOM.
+function attachListening() {
+  highlight(listening.listener.index, false);
+  updatePlayer();
+}
+
+function stopListening() {
+  if (!listening) return;
+  const l = listening.listener;
+  listening = null;
+  l.stop();
+  clearHighlight();
+  updatePlayer();
+}
+
+function clearHighlight() {
+  view.querySelectorAll(".speaking").forEach((el) => el.classList.remove("speaking"));
+}
+
+function highlight(i, follow = true) {
+  clearHighlight();
+  const el = blockEls()[i];
+  if (!el) return;
+  el.classList.add("speaking");
+  // Listening moves the bookmark too, so reading picks up where listening left off.
+  if (listening) {
+    const max = document.documentElement.scrollHeight - innerHeight;
+    progress[listening.postId] = { i, f: 0, pct: max > 0 ? +(el.offsetTop / max).toFixed(3) : 0 };
+    LS.set("progress", progress);
+  }
+  if (!follow) return;
+  const r = el.getBoundingClientRect();
+  const bar = $("player").getBoundingClientRect().height;
+  if (r.top < barHeight() || r.bottom > innerHeight - bar) {
+    pinUntil = 0;
+    scrollTo({ top: r.top + scrollY - barHeight() - 16, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  }
+}
+
+async function keepAwake() {
+  try {
+    if (!wakeLock && navigator.wakeLock) {
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", () => (wakeLock = null));
+    }
+  } catch {}
+}
+function releaseWake() {
+  wakeLock?.release().catch(() => {});
+  wakeLock = null;
+}
+
+addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible" || !listening) return;
+  if (listening.listener.state === "playing") keepAwake();
+  // Speech may have been cut off while we were hidden; pick the sentence back up.
+  setTimeout(() => listening?.listener.nudge(), 400);
+});
+
+const RATES = [0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
+const rateLabel = (r) => (Number.isInteger(r) ? r + ".0" : String(r)) + "×";
+
+function updatePlayer() {
+  const bar = $("player");
+  const l = listening?.listener;
+  if (!l || l.state === "stopped") {
+    bar.hidden = true;
+    document.body.classList.remove("has-player");
+    return;
+  }
+  bar.hidden = false;
+  document.body.classList.add("has-player");
+  $("pl-title").textContent = listening.title;
+  const playing = l.state === "playing";
+  $("pl-toggle").setAttribute("aria-label", playing ? "Pause" : "Play");
+  $("pl-toggle").innerHTML = playing
+    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor"/></svg>'
+    : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>';
+  $("pl-rate").textContent = rateLabel(settings.rate);
+}
+
+$("pl-toggle").addEventListener("click", () => listening?.listener.toggle());
+$("pl-prev").addEventListener("click", () => listening?.listener.jump(-1));
+$("pl-next").addEventListener("click", () => listening?.listener.jump(1));
+$("pl-stop").addEventListener("click", stopListening);
+$("pl-rate").addEventListener("click", () => {
+  const i = RATES.indexOf(settings.rate);
+  settings.rate = RATES[(i + 1) % RATES.length];
+  saveSettings();
+  listening?.listener.setRate(settings.rate);
+  updatePlayer();
+});
 
 // ---------------------------------------------------------------- position memory
 //
@@ -737,6 +871,19 @@ function renderSettings() {
   const base = h("input", { id: "f-base", type: "text", autocomplete: "off", spellcheck: "false", placeholder: "Same as this page", value: settings.base });
   const paidOnly = h("input", { id: "f-paid", type: "checkbox", checked: settings.paidOnly });
   const hideLocked = h("input", { id: "f-locked", type: "checkbox", checked: settings.hideLocked });
+  const voice = h("select", { id: "f-voice" }, h("option", { value: "" }, "Device default"));
+  const fillVoices = () => {
+    const list = (speech?.voices() || []).slice().sort((a, b) => a.lang.localeCompare(b.lang) || a.name.localeCompare(b.name));
+    const lang = (navigator.language || "en").slice(0, 2);
+    // Voices in the device language first; others are rarely wanted.
+    const mine = list.filter((v) => v.lang.toLowerCase().startsWith(lang));
+    voice.replaceChildren(
+      h("option", { value: "" }, "Device default"),
+      ...(mine.length ? mine : list).map((v) => h("option", { value: v.id, selected: v.id === settings.voice }, `${v.name} (${v.lang})`))
+    );
+  };
+  fillVoices();
+  speech?.onVoicesChanged(fillVoices);
   const theme = h(
     "select",
     { id: "f-theme" },
@@ -759,6 +906,7 @@ function renderSettings() {
           paidOnly: paidOnly.checked,
           hideLocked: hideLocked.checked,
           theme: theme.value,
+          voice: voice.value,
         });
         saveSettings();
         applyLook();
@@ -803,6 +951,12 @@ function renderSettings() {
     h("div", { class: "field" }, h("label", { class: "check" }, paidOnly, h("span", {}, "Only show creators I pay"))),
     h("div", { class: "field" }, h("label", { class: "check" }, hideLocked, h("span", {}, "Hide posts my tier doesn't include"))),
     h("div", { class: "field" }, h("label", { for: "f-theme" }, "Appearance"), theme),
+    speech
+      ? [
+          h("div", { class: "field" }, h("label", { for: "f-voice" }, "Listening voice"), voice,
+            h("p", { class: "hint" }, "More voices: Android Settings › Accessibility › Text-to-speech output.")),
+        ]
+      : null,
     h(
       "details",
       { class: "field" },
@@ -828,11 +982,31 @@ function renderSettings() {
       },
       "Clear saved posts"
     ),
+    settings.session ? signOutButton() : null,
     err
   );
   // A new device most likely wants to scan; one that's set up offers its code.
   if (settings.session && settings.key) view.replaceChildren(form, deviceSection());
   else view.replaceChildren(receiveSection(), form);
+}
+
+function signOutButton() {
+  let armed = 0;
+  const btn = h("button", { class: "secondary danger", type: "button" }, "Sign out on this device");
+  btn.addEventListener("click", async () => {
+    if (Date.now() - armed > 4000) {
+      armed = Date.now();
+      btn.textContent = "Tap again to sign out";
+      setTimeout(() => Date.now() - armed >= 4000 && (btn.textContent = "Sign out on this device"), 4100);
+      return;
+    }
+    stopListening();
+    for (const store of ["posts", "bodies", "meta"]) await idb(store, "readwrite", (st) => st.clear());
+    for (const k of Object.keys(localStorage)) if (k.startsWith("pr.")) localStorage.removeItem(k);
+    location.replace(location.pathname + "#/settings");
+    location.reload();
+  });
+  return btn;
 }
 
 // ---------------------------------------------------------------- set up another device

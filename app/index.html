@@ -29,6 +29,22 @@
   </header>
   <div class="status" id="status" role="status" aria-live="polite" hidden></div>
   <main id="view"></main>
+  <div class="player" id="player" role="region" aria-label="Listening" hidden>
+    <div class="pl-title" id="pl-title"></div>
+    <div class="pl-controls">
+      <button class="pl-btn" id="pl-prev" aria-label="Previous paragraph">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 6v12M18 6.5v11L9.5 12z" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="pl-btn pl-main" id="pl-toggle" aria-label="Pause"></button>
+      <button class="pl-btn" id="pl-next" aria-label="Next paragraph">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 6v12M6 6.5v11l8.5-5.5z" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="pl-rate" id="pl-rate" aria-label="Speed">1.0×</button>
+      <button class="pl-btn" id="pl-stop" aria-label="Stop listening">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+  </div>
   <script src="app.js" type="module"></script>
 </body>
 </html>

@@ -1,6 +1,6 @@
 // Offline app shell. Posts live in IndexedDB; API calls are never cached here.
-const VERSION = "pr-v3";
-const SHELL = ["./", "index.html", "style.css", "app.js", "manifest.webmanifest", "icon.svg", "icon-180.png", "icon-192.png"];
+const VERSION = "pr-v4";
+const SHELL = ["./", "index.html", "style.css", "app.js", "manifest.webmanifest", "icon.svg", "icon-180.png", "icon-192.png", "listen.js"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

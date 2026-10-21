@@ -393,3 +393,80 @@ main { max-width: calc(var(--measure) + 2 * var(--gutter)); margin: 0 auto; }
 .scan-area .hint, .device .hint { color: var(--quiet); font-size: .9375rem; }
 .paste-row { margin-top: 1.5rem; }
 .paste-row .secondary { margin: .6rem 0 0; }
+
+/* ---------- listening ---------- */
+
+.listen-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  margin: -1.1rem 0 2rem;
+  padding: .45rem 1rem;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: none;
+  color: var(--accent);
+  font-size: .9375rem;
+  cursor: pointer;
+}
+.listen-btn span { font-size: .7em; }
+
+.body .speaking {
+  background: var(--wash);
+  box-shadow: 0 0 0 .4rem var(--wash);
+  border-radius: 2px;
+}
+
+.player {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+  padding: .55rem var(--gutter) calc(.6rem + env(safe-area-inset-bottom));
+  background: var(--paper);
+  border-top: 2px solid var(--accent);
+}
+.pl-title {
+  max-width: var(--measure);
+  margin: 0 auto .35rem;
+  font-size: .875rem;
+  color: var(--quiet);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pl-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: var(--measure);
+  margin: 0 auto;
+}
+.pl-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+.pl-btn svg { width: 1.4rem; height: 1.4rem; }
+.pl-main { width: 3.25rem; height: 3.25rem; background: var(--accent); color: var(--paper); }
+.pl-btn:active { background: var(--wash); }
+.pl-main:active { background: var(--accent); opacity: .85; }
+.pl-rate {
+  min-width: 3.5rem;
+  height: 2.5rem;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: none;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+body.has-player { padding-bottom: calc(7rem + env(safe-area-inset-bottom)); }
+.secondary.danger { color: var(--error); border-color: currentColor; margin: .75rem 0 0; display: block; }

@@ -5,6 +5,7 @@ A calm, mobile-first reader for the creators you support on Patreon. Just their 
 - One chronological feed across all your creators, or one creator at a time
 - Unread markers, and "Next chapter" at the end of each post
 - Remembers exactly where you were reading, even after your phone closes the app
+- Listen mode: reads posts aloud with your device's voices, following along paragraph by paragraph (while the app is open)
 - Works offline for posts it has already loaded
 - Light and dark themes, adjustable text size
 - Installs to your home screen like an app
