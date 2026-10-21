@@ -433,13 +433,20 @@ html { overscroll-behavior-y: contain; } /* our pull-to-refresh, not the browser
   height: 2.5rem;
   border: 1px solid var(--rule);
   border-radius: 50%;
-  background: var(--paper);
+  /* Slightly see-through: a little of the text shows behind. */
+  background: color-mix(in srgb, var(--paper) 70%, transparent);
   color: var(--ink);
-  box-shadow: 0 2px 8px rgba(20, 28, 25, .14);
+  box-shadow: 0 2px 8px rgba(20, 28, 25, .1);
   cursor: pointer;
 }
 .au-btn svg { width: 1.1rem; height: 1.1rem; }
-.au-main { width: 2.75rem; height: 2.75rem; border-color: var(--accent); background: var(--accent); color: var(--paper); }
+.au-main {
+  width: 2.75rem;
+  height: 2.75rem;
+  border-color: transparent;
+  background: color-mix(in srgb, var(--accent) 78%, transparent);
+  color: var(--paper);
+}
 .au-btn:active { background: var(--wash); }
 .au-main:active { background: var(--accent); opacity: .85; }
 
