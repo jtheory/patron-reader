@@ -71,7 +71,9 @@ Then publish:
 npm run deploy
 ```
 
-It prints your app's address, like `https://patron-reader.your-name.workers.dev`. The free Cloudflare plan is far more than one person needs.
+Before deploying, edit `worker/wrangler.toml`: either change the `routes` hostname to a (sub)domain of a domain on your Cloudflare account, or delete the `routes` block and set `workers_dev = true` to get a free `https://patron-reader.<your-name>.workers.dev` address. The free Cloudflare plan is far more than one person needs.
+
+Pick the final address before installing the app on your phone: your session, settings and saved posts are stored per address.
 
 ## 3. Install it on your phone
 

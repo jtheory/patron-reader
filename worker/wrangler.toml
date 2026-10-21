@@ -2,6 +2,15 @@ name = "patron-reader"
 main = "src/index.js"
 compatibility_date = "2026-10-01"
 
+# Served only at your own domain (Cloudflare creates the DNS record and certificate).
+# Change the hostname to a domain on your own Cloudflare account, or remove this
+# block and set workers_dev = true to use the free *.workers.dev address instead.
+routes = [
+  { pattern = "reader.robwhelan.com", custom_domain = true },
+]
+workers_dev = false
+preview_urls = false
+
 # The reader app (app/) is served as static files by the same Worker,
 # so the app and the /api proxy share one origin: no CORS setup needed.
 [assets]
