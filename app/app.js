@@ -797,7 +797,22 @@ function updatePlayer() {
   updateControls();
 }
 
-$("au-toggle").addEventListener("click", () => listening?.listener.toggle());
+// Play/pause. One bookmark for reading and listening: if you've scrolled away
+// from where listening paused, start from the paragraph at the top of the
+// screen instead of dragging you back.
+function playPause() {
+  if (!current) return;
+  if (!listeningHere()) return startListening(current.post, readerSpot()?.i || 0);
+  const l = listening.listener;
+  if (l.state === "playing") return l.pause();
+  const el = blockEls()[l.index];
+  const r = el?.getBoundingClientRect();
+  const onScreen = r && r.bottom > barHeight() && r.top < innerHeight;
+  if (!onScreen) l.seek(readerSpot()?.i || 0);
+  l.play();
+}
+
+$("au-toggle").addEventListener("click", playPause);
 $("au-prev").addEventListener("click", () => listening?.listener.jump(-1));
 $("au-next").addEventListener("click", () => listening?.listener.jump(1));
 
@@ -843,9 +858,7 @@ function armControlsHide() {
 }
 
 $("ct-play").addEventListener("click", () => {
-  if (!current) return;
-  if (listeningHere()) listening.listener.toggle();
-  else startListening(current.post, readerSpot()?.i || 0);
+  playPause();
   hideControls();
 });
 const stepRate = (dir) => {

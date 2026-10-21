@@ -108,6 +108,8 @@ export class Listener {
     while (gen === this.gen && this.index < this.blocks.length) {
       const parts = chunk(this.blocks[this.index]);
       while (gen === this.gen && this.part < parts.length) {
+        // Remember where each sentence started, to resume accurately after interruptions.
+        this.at = { index: this.index, part: this.part, t: Date.now(), prev: this.at && { ...this.at, prev: null } };
         try {
           await this.engine.speak(parts[this.part], { rate: this.rate, voice: this.voice });
         } catch {
@@ -137,7 +139,6 @@ export class Listener {
 
   pause() {
     if (this.state !== "playing") return;
-    if (this.suspended) this.part = 0;
     this.suspended = false;
     this.gen++;
     this.engine.cancel();
@@ -149,13 +150,20 @@ export class Listener {
     else this.play();
   }
 
-  // The app went to the background: engines often report the cut-off sentence
-  // as *finished*, which would skip ahead. So stop listening to the engine now
-  // and rewind to the start of the current paragraph; resume() picks up there.
+  // The app went to the background: the sentence being spoken gets cut off.
+  // Engines often report it as *finished*, which would skip ahead, so stop
+  // listening to the engine now and rewind to the start of that sentence.
+  // If the "next" sentence began only moments ago, that was the engine racing
+  // ahead after the cut: go back one more.
   suspend() {
     if (this.state !== "playing") return;
     this.gen++;
-    this.part = 0;
+    let at = this.at;
+    if (at && at.prev && Date.now() - at.t < 400) at = at.prev;
+    if (at) {
+      this.index = at.index;
+      this.part = at.part;
+    }
     this.suspended = true;
     this.engine.cancel();
   }
@@ -180,6 +188,13 @@ export class Listener {
     this.skipEmpty(dir || 1);
     if (this.state === "playing") this.play();
     else this.onIndex(this.index);
+  }
+
+  // Move to the start of a paragraph without playing (e.g. where the reader scrolled to).
+  seek(index) {
+    this.index = Math.max(0, Math.min(this.blocks.length - 1, index));
+    this.part = 0;
+    this.skipEmpty(1);
   }
 
   setRate(rate) {
