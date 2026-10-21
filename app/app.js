@@ -449,6 +449,10 @@ async function render() {
 }
 
 addEventListener("hashchange", () => {
+  if (takeConnectLink()) {
+    render();
+    return;
+  }
   scrollMemory.set(lastHash, scrollY);
   if (lastHash.startsWith("#/p/")) {
     const id = lastHash.slice(4);
@@ -826,7 +830,109 @@ function renderSettings() {
     ),
     err
   );
-  view.replaceChildren(form);
+  view.replaceChildren(form, ...(settings.session && settings.key ? [deviceSection()] : []));
+}
+
+// ---------------------------------------------------------------- set up another device
+//
+// A QR code (or link) carrying the session and access key, so a phone can be
+// set up by scanning instead of typing. They ride in the #fragment, which
+// browsers never send to a server; the app reads it, saves it, and wipes it
+// from the address bar straight away.
+
+const b64url = (str) => btoa(String.fromCharCode(...new TextEncoder().encode(str))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const unb64url = (s) => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0)));
+
+function connectLink() {
+  const payload = b64url(JSON.stringify({ v: 1, s: settings.session, k: settings.key, b: settings.base || undefined }));
+  return location.origin + location.pathname + "#/connect/" + payload;
+}
+
+function takeConnectLink() {
+  const m = location.hash.match(/^#\/connect\/([\w-]+)/);
+  if (!m) return false;
+  history.replaceState(null, "", "#/");
+  lastHash = "#/";
+  try {
+    const d = JSON.parse(unb64url(m[1]));
+    if (!d.s || !d.k) throw new Error("incomplete");
+    const changed = d.s !== settings.session || d.k !== settings.key;
+    Object.assign(settings, { session: d.s, key: d.k, base: d.b || "" });
+    saveSettings();
+    showStatus("This device is set up. Loading your feed…");
+    if (changed) sync().then(() => showStatus("Up to date."), handleError);
+  } catch {
+    showStatus("That setup link is damaged. Show a fresh QR code on your other device and scan again.", { error: true, sticky: true });
+  }
+  return true;
+}
+
+async function qrSvg(text) {
+  const { qrMatrix } = await import("./vendor/qrcode.js");
+  const q = qrMatrix(text, "L");
+  const pad = 4;
+  const n = q.size + pad * 2;
+  let d = "";
+  for (let r = 0; r < q.size; r++) for (let c = 0; c < q.size; c++) if (q.isDark(r, c)) d += `M${c + pad} ${r + pad}h1v1h-1z`;
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", `0 0 ${n} ${n}`);
+  svg.setAttribute("class", "qr");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "Setup QR code");
+  svg.setAttribute("shape-rendering", "crispEdges");
+  const bg = document.createElementNS(ns, "rect");
+  bg.setAttribute("width", n);
+  bg.setAttribute("height", n);
+  bg.setAttribute("fill", "#fff");
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", d);
+  path.setAttribute("fill", "#000");
+  svg.append(bg, path);
+  return svg;
+}
+
+function deviceSection() {
+  const box = h("div", { class: "qr-box", hidden: true });
+  const toggle = h("button", { class: "secondary", type: "button" }, "Show setup code");
+  let shown = false;
+  toggle.addEventListener("click", async () => {
+    shown = !shown;
+    if (shown) {
+      const link = connectLink();
+      const copy = h("button", { class: "secondary", type: "button" }, "Copy setup link");
+      copy.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(link);
+          copy.textContent = "Copied";
+        } catch {
+          copy.textContent = "Couldn't copy";
+        }
+      });
+      box.replaceChildren(
+        await qrSvg(link),
+        h("p", { class: "hint" }, "Scan with your phone's camera. On Android, scan from Chrome (tap the address bar, then the camera icon) so it opens in Chrome rather than another browser."),
+        h("p", { class: "warn" }, "This code contains your Patreon session: anyone who scans it can use your account. Hide it once your phone is set up."),
+        copy
+      );
+      box.hidden = false;
+      toggle.textContent = "Hide setup code";
+      // Don't leave it on screen if you walk away.
+      setTimeout(() => shown && toggle.click(), 2 * 60 * 1000);
+    } else {
+      box.replaceChildren();
+      box.hidden = true;
+      toggle.textContent = "Show setup code";
+    }
+  });
+  return h(
+    "section",
+    { class: "device" },
+    h("h2", {}, "Set up another device"),
+    h("p", { class: "lede" }, "Show a code here and scan it with your phone to copy your session and access key across."),
+    toggle,
+    box
+  );
 }
 
 // ---------------------------------------------------------------- start
@@ -837,6 +943,7 @@ $("refresh").addEventListener("click", () => {
 });
 
 applyLook();
+takeConnectLink();
 
 // Cold launch (opened at the start URL): go back to where we were.
 const here = LS.get("here", null);

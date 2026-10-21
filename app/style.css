@@ -354,3 +354,23 @@ main { max-width: calc(var(--measure) + 2 * var(--gutter)); margin: 0 auto; }
   cursor: pointer;
 }
 .form-error { color: var(--error); margin: 1rem 0 0; }
+
+/* ---------- set up another device ---------- */
+
+.device {
+  margin: 0 var(--gutter) 3rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--rule);
+}
+.device h2 { font-size: 1.25rem; margin: 0 0 .4rem; }
+.device .lede { color: var(--quiet); margin: 0 0 1rem; }
+.device .secondary { margin-left: 0; }
+.qr-box { margin-top: 1.25rem; }
+.qr {
+  display: block;
+  width: min(100%, 18rem);
+  height: auto;
+  border-radius: 6px;
+}
+.qr-box .hint { color: var(--quiet); font-size: .9375rem; }
+.warn { color: var(--error); font-size: .9375rem; }
