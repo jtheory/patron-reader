@@ -1,58 +1,120 @@
-# patron-reader
+# Patron Reader
 
-A calm, chronological, mobile-first reader for the creators you support on Patreon — text and images, no discovery feed, no recommendations.
+A calm, mobile-first reader for the creators you support on Patreon. Just their posts, newest first, in a reading view built for long chapters. No discovery feed, no recommendations.
 
-Personal project; not affiliated with or endorsed by Patreon. It reads only content your own account already has access to.
+- One chronological feed across all your creators, or one creator at a time
+- Unread markers, and "Next chapter" at the end of each post
+- Remembers exactly where you were reading, even after your phone closes the app
+- Works offline for posts it has already loaded
+- Light and dark themes, adjustable text size
+- Installs to your home screen like an app
+
+Personal project; not affiliated with or endorsed by Patreon. It only shows content your own account can already see.
 
 ## How it works
 
 ```
-PWA (your phone)  ──►  Worker (stateless proxy)  ──►  patreon.com/api
- session_id in          adds Cookie + CORS,
- localStorage           stores nothing
+Your phone                    Your Cloudflare Worker              Patreon
+Patron Reader app   ──────►   serves the app, and passes   ──────►  patreon.com/api
+(session kept on              your session on to Patreon
+ your device)                 (stores nothing)
 ```
 
-Browsers can't send a `Cookie` header with `fetch`, and Patreon doesn't send CORS headers for other origins, so a tiny proxy is needed. It's stateless: the PWA sends your `session_id` per request in `X-Patreon-Session`, plus a shared `X-Proxy-Key` so nobody else can use the Worker.
+Patreon has no official way for supporters to read posts through an app, so Patron Reader uses the same behind-the-scenes requests as the Patreon website, signed in with your own session. Browsers don't allow a web page to send those requests directly, so a tiny proxy (a free Cloudflare Worker) does it. The proxy keeps nothing: your session lives only on your phone and is sent along with each request.
 
-## Step 1: smoke test (no deploy needed)
+## 1. Get your Patreon session
 
-Get your `session_id`: log in at patreon.com on a desktop browser → DevTools → Application/Storage → Cookies → `https://www.patreon.com` → copy `session_id`.
+Patron Reader signs in using your **session**: the code your browser keeps to remember you're logged in to Patreon. You need to copy it once, from a computer.
 
-```sh
-SESSION_ID=... node scripts/smoke-test.mjs
-```
+> **Treat it like a password.** Anyone with it can use your Patreon account. Don't share it or post it anywhere. If it ever leaks, sign out of Patreon in that browser and it stops working.
 
-It checks: the session works → which creators you support → whether the latest patron-only posts are readable.
+### The easy way: Cookie-Editor (Chrome, Edge, Firefox)
 
-If it can't find your creators, test post reading for one creator by hand: open their Patreon page with DevTools → Network, filter on `campaign_id`, and copy the number from a `/api/posts?filter[campaign_id]=…` request. Then:
+1. On a computer, install the free **Cookie-Editor** browser extension from your browser's extension store (Chrome Web Store, Edge Add-ons, or Firefox Add-ons).
+2. Go to [patreon.com](https://www.patreon.com) and make sure you're signed in.
+3. Click the Cookie-Editor icon in the toolbar (you may need to open the puzzle-piece menu first and pin it).
+4. In the list, click **session_id**.
+5. Select everything in the **Value** box and copy it. That's your session.
 
-```sh
-SESSION_ID=... CAMPAIGN_ID=12345 node scripts/smoke-test.mjs
-```
+You can uninstall the extension afterwards if you like.
 
-## Step 2: run the Worker
+### Without installing anything (developer tools)
+
+1. On a computer, sign in at [patreon.com](https://www.patreon.com).
+2. Open developer tools: press **F12** on Windows, or **⌥⌘I** on a Mac. (Safari: first turn on *Settings › Advanced › Show features for web developers*.)
+3. Go to the **Application** tab (Chrome, Edge) or **Storage** tab (Firefox, Safari).
+4. In the sidebar, open **Cookies › https://www.patreon.com**.
+5. Find the row named **session_id** and copy its **Value**.
+
+### Good to know
+
+- The session keeps working until you **sign out of Patreon in that browser**. Just close the tab; don't sign out.
+- If Patron Reader says Patreon didn't accept your session, repeat the steps above and paste the new one in Settings.
+- Copying from a phone alone is hard: phone browsers mostly hide this. Using a computer once is the simplest route.
+
+## 2. Set up your Worker (one time, about 10 minutes)
+
+You need a free [Cloudflare](https://dash.cloudflare.com/sign-up) account, [Node.js](https://nodejs.org) on your computer, and this repository downloaded.
 
 ```sh
 cd worker
 npm install
-echo "PROXY_KEY=$(openssl rand -hex 24)" > .dev.vars
-npm run dev            # local, at http://localhost:8787
-
-# then test through it:
-SESSION_ID=... PROXY_URL=http://localhost:8787 PROXY_KEY=<from .dev.vars> \
-  node ../scripts/smoke-test.mjs
+npx wrangler login              # opens a browser to connect your Cloudflare account
+npx wrangler secret put PROXY_KEY
 ```
 
-Deploy to Cloudflare (free plan is plenty):
+When asked for `PROXY_KEY`, type any long random password and keep it somewhere safe. This is the **access key** the app asks for; it stops anyone else from using your Worker. (`openssl rand -hex 24` makes a good one.)
+
+Then publish:
 
 ```sh
-npx wrangler login
-npx wrangler secret put PROXY_KEY
 npm run deploy
 ```
 
-Set `ALLOWED_ORIGINS` in `worker/wrangler.toml` to your PWA's URL.
+It prints your app's address, like `https://patron-reader.your-name.workers.dev`. The free Cloudflare plan is far more than one person needs.
 
-## Step 3: the PWA
+## 3. Install it on your phone
 
-`app/` — coming next.
+1. Open your Worker address on your phone.
+2. Paste your **Patreon session** and **access key** in Settings, then tap **Save and load feed**.
+3. Add it to your home screen:
+   - **iPhone (Safari):** Share button › **Add to Home Screen**.
+   - **Android (Chrome):** ⋮ menu › **Install app** (or *Add to Home screen*).
+
+Open it from the home screen icon from then on, so it runs full-screen and keeps its saved posts.
+
+## For developers
+
+### Layout
+
+- `app/`: the reader itself. Plain HTML, CSS and JavaScript; no build step.
+- `worker/`: the Cloudflare Worker. It serves `app/` and forwards `GET /api/*` to Patreon, adding the session cookie. It only allows `/api/*`, requires the `X-Proxy-Key` header, and stores nothing.
+- `scripts/smoke-test.mjs`: checks your session works and posts are readable, without deploying anything.
+
+### Smoke test
+
+```sh
+SESSION_ID=... node scripts/smoke-test.mjs                  # direct to Patreon
+SESSION_ID=... CREATOR=ddwebb node scripts/smoke-test.mjs   # pick a creator by name
+```
+
+It reports whether your session works, which creators you support, and whether recent posts are readable or locked. To test one creator by ID, set `CAMPAIGN_ID` instead.
+
+### Local development
+
+```sh
+cd worker
+echo "PROXY_KEY=$(openssl rand -hex 24)" > .dev.vars
+npm run dev       # app and proxy at http://localhost:8787
+```
+
+The service worker only registers over HTTPS, so local reloads always get fresh files.
+
+### What Patreon returns
+
+Discovered with the smoke test; Patreon's internal API is undocumented and may change.
+
+- **Your creators:** `/api/current_user?include=active_memberships.campaign` (everyone you follow, free or paid). `include=pledges.campaign` gives only those you pay.
+- **Posts:** `/api/posts?filter[campaign_id]=…&sort=-published_at`, paged via `links.next`.
+- **Post text** is in `content_json_string`: a ProseMirror-style JSON document (`doc › paragraph › text` with `bold`/`italic` marks). `content` is usually `null`.
+- **Locked posts** have `current_user_can_view: false`. **Billing placeholders** have `is_automated_monthly_charge: true` and are hidden.

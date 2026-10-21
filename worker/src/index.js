@@ -8,6 +8,7 @@
 //   4. returns the response with CORS headers added.
 // Nothing is stored here; the session_id lives only on your device.
 
+// env.UPSTREAM can point at a mock server for local testing.
 const UPSTREAM = "https://www.patreon.com";
 const DEFAULT_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
@@ -23,6 +24,7 @@ function corsHeaders(env, origin) {
     "Access-Control-Allow-Origin": ok ? origin : allowed[0] || "null",
     "Access-Control-Allow-Methods": "GET, OPTIONS",
     "Access-Control-Allow-Headers": "X-Proxy-Key, X-Patreon-Session",
+    "Access-Control-Expose-Headers": "X-Upstream-Status",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
@@ -70,7 +72,7 @@ export default {
       return json(400, { error: "Missing or malformed X-Patreon-Session" }, cors);
     }
 
-    const upstream = await fetch(UPSTREAM + url.pathname + url.search, {
+    const upstream = await fetch((env.UPSTREAM || UPSTREAM) + url.pathname + url.search, {
       method: "GET",
       headers: {
         Cookie: `session_id=${session}`,

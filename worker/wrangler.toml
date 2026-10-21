@@ -2,8 +2,14 @@ name = "patron-reader"
 main = "src/index.js"
 compatibility_date = "2026-10-01"
 
+# The reader app (app/) is served as static files by the same Worker,
+# so the app and the /api proxy share one origin: no CORS setup needed.
+[assets]
+directory = "../app"
+
 [vars]
-# Comma-separated origins allowed to call the proxy (your PWA's URL(s)).
+# Extra origins allowed to call /api cross-origin (e.g. a local dev server).
+# Not needed when using the app served by this Worker.
 ALLOWED_ORIGINS = "http://localhost:5173"
 
 # Secret, set with:  npx wrangler secret put PROXY_KEY
