@@ -25,7 +25,7 @@ function corsHeaders(env, origin) {
     "Access-Control-Allow-Origin": ok ? origin : allowed[0] || "null",
     "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "X-Proxy-Key, X-Patreon-Session, Content-Type",
-    "Access-Control-Expose-Headers": "X-Upstream-Status",
+    "Access-Control-Expose-Headers": "X-Upstream-Status, X-Upstream-Mitigated, X-Debug-Csrf",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
@@ -57,6 +57,7 @@ const isAllowedWrite = (method, path) => WRITES.some((w) => w.method === method 
 
 // Patreon's website sends a CSRF signature with every write; it's embedded in
 // its pages. Fetch one for this session just before writing (writes are rare).
+// `note` says how that went, for the X-Debug-Csrf header.
 async function csrfSignature(env, headers) {
   try {
     const res = await fetch((env.UPSTREAM || UPSTREAM) + "/home", {
@@ -64,9 +65,11 @@ async function csrfSignature(env, headers) {
       redirect: "follow",
     });
     const html = await res.text();
-    return html.match(/"csrfSignature"\s*:\s*"([^"]+)"/)?.[1] || html.match(/csrf[-_]?signature["']?\s*[:=]\s*["']([^"']+)/i)?.[1] || null;
-  } catch {
-    return null;
+    const sig = html.match(/"csrfSignature"\s*:\s*"([^"]+)"/)?.[1] || html.match(/csrf[-_]?signature["']?\s*[:=]\s*["']([^"']+)/i)?.[1] || null;
+    const mitigated = res.headers.get("cf-mitigated");
+    return { sig, note: sig ? "found" : `missing; page ${res.status}${mitigated ? ", " + mitigated : ""}` };
+  } catch (e) {
+    return { sig: null, note: "page fetch failed" };
   }
 }
 
@@ -105,12 +108,14 @@ export default {
       Referer: "https://www.patreon.com/home",
     };
     let body;
+    let csrfNote = null;
     if (write) {
       body = await request.text();
       if (body.length > 20000) return json(413, { error: "Too long" }, cors);
       if (body) headers["Content-Type"] = "application/vnd.api+json";
       const csrf = await csrfSignature(env, headers);
-      if (csrf) headers["X-CSRF-Signature"] = csrf;
+      if (csrf.sig) headers["X-CSRF-Signature"] = csrf.sig;
+      csrfNote = csrf.note;
       headers.Origin = "https://www.patreon.com";
     }
 
@@ -121,11 +126,15 @@ export default {
       redirect: "manual",
     });
 
-    // Pass the body through untouched; only add CORS and a debug hint.
+    // Pass the body through untouched; only add CORS and debug hints.
+    // cf-mitigated is how Cloudflare (in front of Patreon) marks a bot challenge.
     const out = new Headers(cors);
     out.set("Content-Type", upstream.headers.get("Content-Type") || "application/json");
     out.set("Cache-Control", "no-store");
     out.set("X-Upstream-Status", String(upstream.status));
+    const mitigated = upstream.headers.get("cf-mitigated");
+    if (mitigated) out.set("X-Upstream-Mitigated", mitigated);
+    if (csrfNote) out.set("X-Debug-Csrf", csrfNote);
     return new Response(upstream.body, { status: upstream.status, headers: out });
   },
 };

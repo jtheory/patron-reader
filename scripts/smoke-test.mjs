@@ -10,7 +10,12 @@
 //   SESSION_ID=xxx PROXY_URL=https://patron-reader.<you>.workers.dev \
 //   PROXY_KEY=yyy node scripts/smoke-test.mjs
 //
-// It answers three questions, in order:
+// Debug liking (likes, then un-likes, one post; run it both ways and compare):
+//   SESSION_ID=xxx LIKE_TEST=<post id> node scripts/smoke-test.mjs
+//   SESSION_ID=xxx LIKE_TEST=<post id> PROXY_URL=... PROXY_KEY=... node scripts/smoke-test.mjs
+// The post id is the number at the end of its patreon.com/posts/... address.
+//
+// Otherwise it answers three questions, in order:
 //   1. Does the session work?            (who am I)
 //   2. Which creators do I support?      (memberships -> campaigns)
 //   3. Can I read full patron-only posts? (latest posts + whether body is visible)
@@ -50,6 +55,64 @@ async function api(path) {
 }
 
 const qs = (o) => new URLSearchParams(o).toString();
+
+// ------------------------------------------------------------ like test
+
+const UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+
+// One request, reported in full rather than thrown.
+async function probe(method, path, extra = {}) {
+  const headers = viaProxy
+    ? { "X-Proxy-Key": PROXY_KEY || "", "X-Patreon-Session": SESSION_ID, ...extra }
+    : {
+        Cookie: `session_id=${SESSION_ID}`,
+        "User-Agent": UA,
+        Accept: "application/vnd.api+json, application/json",
+        Referer: "https://www.patreon.com/home",
+        Origin: "https://www.patreon.com",
+        ...extra,
+      };
+  const res = await fetch(base + path, { method, headers, redirect: "manual" });
+  const text = await res.text();
+  const h = (k) => res.headers.get(k);
+  console.log(`  ${method} ${path.split("?")[0]} -> ${res.status} ${h("content-type") || ""}`);
+  for (const k of ["cf-mitigated", "x-upstream-status", "x-upstream-mitigated", "x-debug-csrf", "cf-ray", "server"]) {
+    if (h(k)) console.log(`     ${k}: ${h(k)}`);
+  }
+  const flat = text.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  if (flat) console.log(`     body: ${flat.slice(0, 300)}`);
+  return { res, text };
+}
+
+async function likeTest(postId) {
+  console.log(`Like test on post ${postId}, ${viaProxy ? "via Worker " + base : "direct to patreon.com"}\n`);
+  const extra = {};
+  if (!viaProxy) {
+    // The Worker does this part itself (see its X-Debug-Csrf header).
+    console.log("CSRF signature from /home:");
+    const { text } = await probe("GET", "/home", { Accept: "text/html" });
+    const sig = text.match(/"csrfSignature"\s*:\s*"([^"]+)"/)?.[1] || text.match(/csrf[-_]?signature["']?\s*[:=]\s*["']([^"']+)/i)?.[1];
+    console.log(sig ? "  ✓ found one" : "  ✗ none in the page");
+    if (sig) extra["X-CSRF-Signature"] = sig;
+  }
+  const path = `/api/posts/${postId}/likes?json-api-version=1.0`;
+  console.log("\nLike:");
+  const liked = await probe("POST", path, extra);
+  console.log("\nUnlike:");
+  await probe("DELETE", path, extra);
+  console.log(liked.res.ok ? "\n✓ Liking works this way." : "\n✗ Liking was refused this way; the lines above say how.");
+}
+
+if (process.env.LIKE_TEST) {
+  try {
+    await likeTest(process.env.LIKE_TEST);
+  } catch (e) {
+    console.error("✗ " + e.message);
+    process.exit(1);
+  }
+  process.exit(0);
+}
 // Patreon stores post bodies as a JSON rich-text doc (ProseMirror-style):
 // { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text }] }] }
 // Flatten it to plain text, one line per block, just to check it's there.

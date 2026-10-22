@@ -414,6 +414,12 @@ main { max-width: calc(var(--measure) + 2 * var(--gutter)); margin: 0 auto; }
   transition: background .2s ease;
 }
 .sheet.show { background: rgba(10, 14, 12, .4); }
+/* The finger that opened it is still down: don't let it select the menu's text. */
+.sheet {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
 .sheet-panel {
   width: min(100%, calc(var(--measure) + 2 * var(--gutter)));
   max-height: 85vh;
@@ -531,6 +537,17 @@ main { max-width: calc(var(--measure) + 2 * var(--gutter)); margin: 0 auto; }
 .paste-row .secondary { margin: .6rem 0 0; }
 
 
+.trouble { margin-top: 1.75rem; font-size: .9375rem; color: var(--quiet); }
+.trouble pre {
+  margin: .6rem 0;
+  padding: .6rem .75rem;
+  border-radius: 6px;
+  background: var(--wash);
+  font-size: .8125rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.trouble-actions .secondary { margin: 0 .5rem 0 0; }
 .secondary.danger { display: block; margin: 1.75rem 0 0; color: var(--error); border-color: currentColor; }
 body { touch-action: manipulation; } /* taps register instantly, no double-tap zoom */
 html { overscroll-behavior-y: contain; } /* our pull-to-refresh, not the browser's */

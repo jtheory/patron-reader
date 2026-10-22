@@ -47,7 +47,13 @@ function applyLook() {
   if (settings.theme === "auto") root.removeAttribute("data-theme");
   else root.setAttribute("data-theme", settings.theme);
   root.style.setProperty("--reader-size", settings.size + "rem");
+  // Keep the system bars' colour in step with the page, including a theme
+  // chosen here rather than by the device (Chrome otherwise falls back to the
+  // manifest's light colour).
+  const paper = getComputedStyle(root).getPropertyValue("--paper").trim();
+  if (paper) for (const m of document.querySelectorAll('meta[name="theme-color"]')) m.setAttribute("content", paper);
 }
+matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => applyLook());
 
 // ---------------------------------------------------------------- storage
 
@@ -132,8 +138,21 @@ async function api(path, { method = "GET", body } = {}) {
   if (res.status === 401 && !upstream) throw new ApiError("key", "The proxy rejected the access key. Check it in Settings.");
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    if (/Just a moment|cf-chl|challenge/i.test(text)) throw new ApiError("blocked", "Patreon's bot check blocked the request. Try again in a few minutes.");
-    if (method !== "GET" && res.status !== 401) throw new ApiError("write", `Patreon didn't accept that (${res.status}). You can still do it on Patreon.`);
+    const mitigated = res.headers.get("X-Upstream-Mitigated");
+    // Kept for Settings › Troubleshooting, so a failure can be reported as-is.
+    LS.set("lastError", {
+      at: new Date().toISOString(),
+      request: method + " " + path.split("?")[0],
+      status: res.status,
+      upstream,
+      mitigated,
+      csrf: res.headers.get("X-Debug-Csrf"),
+      type: res.headers.get("Content-Type"),
+      body: text.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 400),
+    });
+    const more = method === "GET" ? "" : " Details in Settings › Troubleshooting.";
+    if (mitigated || /Just a moment|cf-chl|cf_chl/i.test(text)) throw new ApiError("blocked", "Patreon's bot check blocked the request." + (more || " Try again in a few minutes."));
+    if (method !== "GET" && res.status !== 401) throw new ApiError("write", `Patreon didn't accept that (${res.status}).` + more);
     if (res.status === 401 || res.status === 403) throw new ApiError("session", "Patreon didn't accept your session. Paste a fresh session_id in Settings.");
     throw new ApiError("upstream", `Patreon returned an error (${res.status}).`);
   }
@@ -546,7 +565,10 @@ function setBar(r) {
 async function render() {
   const r = route();
   setBar(r);
-  if (r.name !== "post") hideControls();
+  if (r.name !== "post") {
+    hideControls();
+    setFullscreen(false);
+  }
   if (r.name === "settings") return renderSettings();
   if (r.name === "post") return renderPost(r.id);
   return renderFeed(r.creator);
@@ -773,6 +795,7 @@ addEventListener("hashchange", closeSheet);
     timer = null;
     swallowClick = Date.now() + 700;
     navigator.vibrate?.(8);
+    getSelection()?.removeAllRanges();
     openPostMenu(a.dataset.post);
   };
   view.addEventListener("touchstart", (e) => {
@@ -887,6 +910,7 @@ async function renderPost(id) {
   // Resume where you left off: back to the saved paragraph, or the top.
   const saved = progress[id];
   restoreReader(typeof saved === "object" && saved.pct < 0.97 ? saved : null);
+  setFullscreen(true); // works when we got here by a tap
 }
 
 // Like button and comments, at the end of a chapter.
@@ -1206,6 +1230,7 @@ function showControls() {
   c.classList.add("open");
   c.setAttribute("aria-hidden", "false");
   document.body.classList.add("has-controls");
+  setFullscreen(false);
   armControlsHide();
 }
 function hideControls() {
@@ -1214,6 +1239,7 @@ function hideControls() {
   c.classList.remove("open");
   c.setAttribute("aria-hidden", "true");
   document.body.classList.remove("has-controls");
+  if (route().name === "post") setFullscreen(true);
 }
 function toggleControls() {
   controlsOpen() ? hideControls() : showControls();
@@ -1284,7 +1310,9 @@ function scrollToSpot(spot) {
 }
 
 let pinUntil = 0;
+let pinnedSpot = null;
 function restoreReader(spot) {
+  pinnedSpot = spot;
   if (!spot) {
     scrollTo(0, 0);
     return;
@@ -1326,6 +1354,31 @@ addEventListener("scroll", () => {
 // Save immediately when the app is backgrounded; it may never come back to life.
 addEventListener("visibilitychange", () => document.visibilityState === "hidden" && saveSpot());
 addEventListener("pagehide", saveSpot);
+
+// ---------------------------------------------------------------- fullscreen
+//
+// In the installed app, a chapter hides Android's status and navigation bars.
+// The tap that brings up the reading controls brings the bars back too; they
+// go again with the controls. Browsers only allow entering fullscreen shortly
+// after a tap, so this quietly does nothing otherwise (e.g. after a cold launch,
+// until the first tap).
+
+const canFullscreen = !!document.documentElement.requestFullscreen &&
+  matchMedia("(display-mode: standalone), (display-mode: fullscreen)").matches;
+let keepSpot = null;
+let keepSpotUntil = 0;
+
+function setFullscreen(on) {
+  if (!canFullscreen || on === !!document.fullscreenElement) return;
+  // The viewport changes height: keep the same paragraph at the top.
+  keepSpot = route().name === "post" ? (Date.now() < pinUntil ? pinnedSpot : readerSpot()) : null;
+  keepSpotUntil = Date.now() + 1000;
+  controlsHold = Date.now() + 1000;
+  (on ? document.documentElement.requestFullscreen({ navigationUI: "hide" }) : document.exitFullscreen()).catch(() => {});
+}
+addEventListener("resize", () => {
+  if (Date.now() < keepSpotUntil && keepSpot) scrollToSpot(keepSpot);
+});
 
 // ---------------------------------------------------------------- settings view
 
@@ -1431,9 +1484,34 @@ function renderSettings() {
       : null,
     settings.session ? signOutButton() : null
   );
+  const trouble = troubleshootingSection();
+  if (trouble) form.append(trouble);
   // A new device most likely wants to scan; one that's set up offers its code.
   if (settings.session && settings.key) view.replaceChildren(form, deviceSection());
   else view.replaceChildren(receiveSection(), form);
+}
+
+// The last request Patreon refused, in full, to copy into a bug report.
+function troubleshootingSection() {
+  const e = LS.get("lastError", null);
+  if (!e) return null;
+  const text = Object.entries(e).filter(([, v]) => v != null && v !== "").map(([k, v]) => `${k}: ${v}`).join("\n");
+  const copy = h("button", { class: "secondary", type: "button" }, "Copy details");
+  copy.addEventListener("click", () =>
+    navigator.clipboard.writeText(text).then(() => (copy.textContent = "Copied"), () => (copy.textContent = "Couldn't copy")));
+  const clear = h("button", { class: "secondary", type: "button" }, "Clear");
+  clear.addEventListener("click", () => {
+    LS.set("lastError", null);
+    box.remove();
+  });
+  const box = h(
+    "details",
+    { class: "trouble" },
+    h("summary", {}, "Troubleshooting: last refused request"),
+    h("pre", {}, text),
+    h("div", { class: "trouble-actions" }, copy, clear)
+  );
+  return box;
 }
 
 function signOutButton() {
