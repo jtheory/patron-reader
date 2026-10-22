@@ -565,10 +565,7 @@ function setBar(r) {
 async function render() {
   const r = route();
   setBar(r);
-  if (r.name !== "post") {
-    hideControls();
-    setFullscreen(false);
-  }
+  if (r.name !== "post") hideControls();
   if (r.name === "settings") return renderSettings();
   if (r.name === "post") return renderPost(r.id);
   return renderFeed(r.creator);
@@ -910,7 +907,6 @@ async function renderPost(id) {
   // Resume where you left off: back to the saved paragraph, or the top.
   const saved = progress[id];
   restoreReader(typeof saved === "object" && saved.pct < 0.97 ? saved : null);
-  setFullscreen(true); // works when we got here by a tap
 }
 
 // Like button and comments, at the end of a chapter.
@@ -1247,7 +1243,6 @@ function showControls() {
   c.classList.add("open");
   c.setAttribute("aria-hidden", "false");
   document.body.classList.add("has-controls");
-  setFullscreen(false);
   armControlsHide();
 }
 function hideControls() {
@@ -1256,7 +1251,6 @@ function hideControls() {
   c.classList.remove("open");
   c.setAttribute("aria-hidden", "true");
   document.body.classList.remove("has-controls");
-  if (route().name === "post") setFullscreen(true);
 }
 function toggleControls() {
   controlsOpen() ? hideControls() : showControls();
@@ -1327,9 +1321,7 @@ function scrollToSpot(spot) {
 }
 
 let pinUntil = 0;
-let pinnedSpot = null;
 function restoreReader(spot) {
-  pinnedSpot = spot;
   if (!spot) {
     scrollTo(0, 0);
     return;
@@ -1371,31 +1363,6 @@ addEventListener("scroll", () => {
 // Save immediately when the app is backgrounded; it may never come back to life.
 addEventListener("visibilitychange", () => document.visibilityState === "hidden" && saveSpot());
 addEventListener("pagehide", saveSpot);
-
-// ---------------------------------------------------------------- fullscreen
-//
-// In the installed app, a chapter hides Android's status and navigation bars.
-// The tap that brings up the reading controls brings the bars back too; they
-// go again with the controls. Browsers only allow entering fullscreen shortly
-// after a tap, so this quietly does nothing otherwise (e.g. after a cold launch,
-// until the first tap).
-
-const canFullscreen = !!document.documentElement.requestFullscreen &&
-  matchMedia("(display-mode: standalone), (display-mode: fullscreen)").matches;
-let keepSpot = null;
-let keepSpotUntil = 0;
-
-function setFullscreen(on) {
-  if (!canFullscreen || on === !!document.fullscreenElement) return;
-  // The viewport changes height: keep the same paragraph at the top.
-  keepSpot = route().name === "post" ? (Date.now() < pinUntil ? pinnedSpot : readerSpot()) : null;
-  keepSpotUntil = Date.now() + 1000;
-  controlsHold = Date.now() + 1000;
-  (on ? document.documentElement.requestFullscreen({ navigationUI: "hide" }) : document.exitFullscreen()).catch(() => {});
-}
-addEventListener("resize", () => {
-  if (Date.now() < keepSpotUntil && keepSpot) scrollToSpot(keepSpot);
-});
 
 // ---------------------------------------------------------------- settings view
 
