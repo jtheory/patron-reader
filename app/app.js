@@ -37,7 +37,10 @@ const saveSettings = () => LS.set("settings", settings);
 
 let readSet = LS.get("read", {});        // postId -> 1
 let progress = LS.get("progress", {});   // postId -> { pct, i, f } (see readerSpot)
+let drafts = LS.get("drafts", {});       // postId -> unsent comment text
 const pctOf = (id) => (typeof progress[id] === "number" ? progress[id] : progress[id]?.pct) || 0;
+// Opened, but stopped partway: neither unread nor finished.
+const isReading = (id) => !!readSet[id] && pctOf(id) > 0.02 && pctOf(id) < 0.95;
 
 function applyLook() {
   const root = document.documentElement;
@@ -108,19 +111,20 @@ async function savePosts(items) {
 class ApiError extends Error {
   constructor(kind, message) {
     super(message);
-    this.kind = kind;  // "setup" | "key" | "session" | "blocked" | "network" | "upstream"
+    this.kind = kind;  // "setup" | "key" | "session" | "blocked" | "network" | "upstream" | "write"
   }
 }
 
 const qs = (o) => new URLSearchParams(o).toString();
 
-async function api(path) {
+// GET by default; writes (likes, comments) pass { method, body }.
+async function api(path, { method = "GET", body } = {}) {
   if (!settings.session || !settings.key) throw new ApiError("setup", "Add your Patreon session and access key in Settings.");
   let res;
   try {
-    res = await fetch(settings.base.replace(/\/$/, "") + path, {
-      headers: { "X-Proxy-Key": settings.key, "X-Patreon-Session": settings.session },
-    });
+    const headers = { "X-Proxy-Key": settings.key, "X-Patreon-Session": settings.session };
+    if (body) headers["Content-Type"] = "application/json";
+    res = await fetch(settings.base.replace(/\/$/, "") + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
   } catch {
     throw new ApiError("network", "Can't reach the proxy. Check your connection.");
   }
@@ -129,16 +133,17 @@ async function api(path) {
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     if (/Just a moment|cf-chl|challenge/i.test(text)) throw new ApiError("blocked", "Patreon's bot check blocked the request. Try again in a few minutes.");
+    if (method !== "GET" && res.status !== 401) throw new ApiError("write", `Patreon didn't accept that (${res.status}). You can still do it on Patreon.`);
     if (res.status === 401 || res.status === 403) throw new ApiError("session", "Patreon didn't accept your session. Paste a fresh session_id in Settings.");
     throw new ApiError("upstream", `Patreon returned an error (${res.status}).`);
   }
-  return res.json();
+  return res.status === 204 ? null : res.json().catch(() => null);
 }
 
 const POST_FIELDS = [
   "title", "content", "content_json_string", "teaser_text_json_string", "published_at",
   "url", "current_user_can_view", "is_automated_monthly_charge", "post_type", "image",
-  "min_cents_pledged_to_view",
+  "min_cents_pledged_to_view", "like_count", "current_user_has_liked", "comment_count",
 ].join(",");
 
 function postsPath(campaignId) {
@@ -180,6 +185,9 @@ function shapePost(p, campaignId) {
       image: a.image?.large_url || a.image?.url || null,
       words: countWords(body),
       teaser: a.teaser_text_json_string || null,
+      likes: a.like_count || 0,
+      liked: !!a.current_user_has_liked,
+      comments: a.comment_count || 0,
     },
     body: body ? { kind: a.content_json_string ? "json" : "html", data: body } : null,
   };
@@ -259,6 +267,70 @@ async function loadMore(campaignId) {
   cursors[campaignId] = toPath(r.links?.next) || null;
   await setMeta("cursors", cursors);
   return true;
+}
+
+// Like or unlike straight away on screen; undo it if Patreon says no.
+async function setLiked(p, on) {
+  if (!!p.liked === on) return;
+  const before = { liked: p.liked, likes: p.likes || 0 };
+  Object.assign(p, { liked: on, likes: Math.max(0, before.likes + (on ? 1 : -1)) });
+  await savePosts([{ meta: p }]);
+  try {
+    await api(`/api/posts/${p.id}/likes?json-api-version=1.0`, { method: on ? "POST" : "DELETE" });
+  } catch (e) {
+    Object.assign(p, before);
+    await savePosts([{ meta: p }]);
+    throw e;
+  }
+}
+
+function commentsPath(postId) {
+  return `/api/posts/${postId}/comments?` + qs({
+    include: "commenter,on_behalf_of,replies,replies.commenter,replies.on_behalf_of",
+    "fields[comment]": "body,created,deleted_at,is_by_creator,reply_count",
+    "fields[user]": "full_name",
+    "fields[campaign]": "name",
+    "page[count]": "20",
+    sort: "-created",
+    "json-api-use-default-includes": "false",
+    "json-api-version": "1.0",
+  });
+}
+
+// One page of comments, newest first, each with the replies Patreon sends along.
+async function fetchComments(postId, next) {
+  const r = await api(next || commentsPath(postId));
+  const inc = new Map((r.included || []).map((x) => [x.type + ":" + x.id, x]));
+  const ref = (rel) => (rel?.data ? inc.get(rel.data.type + ":" + rel.data.id) : null);
+  const shape = (c) => {
+    const a = c.attributes || {};
+    const rel = c.relationships || {};
+    const asCreator = ref(rel.on_behalf_of);
+    return {
+      id: c.id,
+      body: a.deleted_at ? "" : a.body || "",
+      created: a.created,
+      byCreator: !!a.is_by_creator || !!asCreator,
+      name: asCreator?.attributes?.name || ref(rel.commenter)?.attributes?.full_name || "Someone",
+      replyCount: a.reply_count || 0,
+      replies: (rel.replies?.data || [])
+        .map((d) => inc.get("comment:" + d.id))
+        .filter(Boolean)
+        .map(shape)
+        .sort((x, y) => (x.created || "").localeCompare(y.created || "")),
+    };
+  };
+  const top = (r.data || []).filter((c) => !c.relationships?.parent?.data);
+  return { comments: top.map(shape), next: toPath(r.links?.next) };
+}
+
+function postComment(postId, text, parentId) {
+  const relationships = { post: { data: { type: "post", id: postId } } };
+  if (parentId) relationships.parent = { data: { type: "comment", id: parentId } };
+  return api("/api/comments?json-api-version=1.0", {
+    method: "POST",
+    body: { data: { type: "comment", attributes: { body: text }, relationships } },
+  });
 }
 
 // ---------------------------------------------------------------- rich text
@@ -521,7 +593,12 @@ async function renderFeed(creatorId) {
   posts.sort((a, b) => sortKey(b).localeCompare(sortKey(a)));
 
   // Avoid rebuilding (and losing scroll) when a background sync changes nothing visible.
-  const key = JSON.stringify([creatorId, posts.map((p) => p.id + (readSet[p.id] ? "r" : "")), unreadBy, settings.paidOnly]);
+  const key = JSON.stringify([
+    creatorId,
+    posts.map((p) => p.id + (readSet[p.id] ? "r" : "") + (isReading(p.id) ? Math.round(pctOf(p.id) * 100) : "") + (p.liked ? "l" : "")),
+    unreadBy,
+    settings.paidOnly,
+  ]);
   if (key === lastFeedKey && view.dataset.view === "feed") return;
   lastFeedKey = key;
   view.dataset.view = "feed";
@@ -558,23 +635,28 @@ async function renderFeed(creatorId) {
       body.push(list);
     }
     const unread = p.canView && !readSet[p.id];
-    const prog = pctOf(p.id);
+    const reading = p.canView && isReading(p.id);
     const fresh = p.unlockedAt ? "Unlocked" : "";
     const len = p.words > 40 ? minutes(p.words) + " min" : "";
     const right = !p.canView
       ? "Locked"
-      : prog > 0.02 && prog < 0.95
-        ? h("span", { class: "progress" }, Math.round(prog * 100) + "% read")
+      : reading
+        ? h("span", { class: "progress" }, Math.round(pctOf(p.id) * 100) + "% read")
         : [fresh, len].filter(Boolean).join(", ");
     list.append(
       h(
         "li",
-        { class: "post-row" + (unread ? " unread" : "") + (p.canView ? "" : " locked") },
+        { class: "post-row" + (unread ? " unread" : "") + (reading ? " reading" : "") + (p.canView ? "" : " locked") },
         h(
           "a",
-          { href: "#/p/" + p.id },
+          { href: "#/p/" + p.id, "data-post": p.id, style: reading ? `--pct:${Math.round(pctOf(p.id) * 100)}%` : null },
           h("span", { class: "post-title" }, p.canView ? null : lockIcon(), p.title),
-          h("span", { class: "post-meta" }, h("span", {}, creator ? "" : byId.get(p.campaignId)?.name), h("span", {}, right))
+          h(
+            "span",
+            { class: "post-meta" },
+            h("span", {}, creator ? "" : byId.get(p.campaignId)?.name),
+            h("span", {}, p.liked ? h("span", { class: "liked-mark", "aria-label": "Liked" }, "♥ ") : null, right)
+          )
         )
       )
     );
@@ -605,6 +687,124 @@ async function renderFeed(creatorId) {
   view.replaceChildren(filters, ...body);
   const active = filters.querySelector('[aria-current="true"]');
   if (active && creator) active.scrollIntoView({ inline: "center", block: "nearest" });
+}
+
+// ---------------------------------------------------------------- post menu
+//
+// Holding a post in the feed opens our own menu instead of the browser's
+// link menu (copy link address, download link…), which makes no sense here.
+
+const sheet = $("sheet");
+const sheetOpen = () => !sheet.hidden;
+
+function closeSheet() {
+  if (sheet.hidden) return;
+  sheet.classList.remove("show");
+  sheet.hidden = true;
+}
+
+async function openPostMenu(id) {
+  const p = await getPost(id);
+  if (!p) return;
+  const creators = (await getMeta("creators")) || [];
+  const creator = creators.find((c) => c.id === p.campaignId);
+  const done = async (fn) => {
+    closeSheet();
+    await fn();
+    lastFeedKey = "";
+    if (route().name === "feed") render();
+  };
+  const item = (label, fn, cls) => h("button", { class: "sheet-item" + (cls ? " " + cls : ""), type: "button", onclick: () => done(fn) }, label);
+  const items = [];
+  if (p.canView) {
+    items.push(item(p.liked ? "♥ Unlike" : "♡ Like", () =>
+      setLiked(p, !p.liked).catch((e) => toast(e instanceof ApiError ? e.message : "Couldn't reach Patreon.", 4000))));
+    if (!readSet[id]) {
+      items.push(item("Mark as read", () => {
+        readSet[id] = 1;
+        LS.set("read", readSet);
+      }));
+    } else {
+      if (isReading(id)) {
+        items.push(item("Mark as finished", () => {
+          progress[id] = { i: 0, f: 0, pct: 1 };
+          LS.set("progress", progress);
+        }));
+      }
+      items.push(item("Mark as unread", () => {
+        delete readSet[id];
+        delete progress[id];
+        LS.set("read", readSet);
+        LS.set("progress", progress);
+      }));
+    }
+  }
+  if (creator && route().creator !== creator.id) items.push(item("More from " + creator.name, () => (location.hash = "#/c/" + creator.id)));
+  if (p.url) {
+    if (navigator.share) items.push(item("Share…", () => navigator.share({ title: p.title, url: p.url }).catch(() => {})));
+    else items.push(item("Copy Patreon link", () => navigator.clipboard.writeText(p.url).then(() => toast("Link copied."), () => toast("Couldn't copy."))));
+    items.push(item("Open on Patreon", () => open(p.url, "_blank", "noopener")));
+  }
+  sheet.replaceChildren(
+    h(
+      "div",
+      { class: "sheet-panel", role: "dialog", "aria-modal": "true", "aria-label": p.title },
+      h("div", { class: "sheet-head" }, h("strong", {}, p.title), creator ? h("span", {}, creator.name) : null),
+      items,
+      h("button", { class: "sheet-item sheet-cancel", type: "button", onclick: closeSheet }, "Cancel")
+    )
+  );
+  sheet.hidden = false;
+  requestAnimationFrame(() => sheet.classList.add("show"));
+  sheet.querySelector(".sheet-item")?.focus({ preventScroll: true });
+}
+sheet.addEventListener("click", (e) => e.target === sheet && closeSheet());
+addEventListener("keydown", (e) => e.key === "Escape" && closeSheet());
+addEventListener("hashchange", closeSheet);
+
+// Long-press. Chrome on Android fires contextmenu (so does right-click);
+// iOS Safari doesn't, so time touches ourselves too.
+{
+  let timer = null;
+  let start = null;
+  let swallowClick = 0;
+  const begin = (a) => {
+    clearTimeout(timer);
+    timer = null;
+    swallowClick = Date.now() + 700;
+    navigator.vibrate?.(8);
+    openPostMenu(a.dataset.post);
+  };
+  view.addEventListener("touchstart", (e) => {
+    const a = e.target.closest("a[data-post]");
+    if (!a || e.touches.length > 1) return;
+    start = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    timer = setTimeout(() => begin(a), 500);
+  }, { passive: true });
+  view.addEventListener("touchmove", (e) => {
+    if (timer && start && Math.hypot(e.touches[0].clientX - start.x, e.touches[0].clientY - start.y) > 10) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  }, { passive: true });
+  for (const ev of ["touchend", "touchcancel"]) view.addEventListener(ev, () => {
+    clearTimeout(timer);
+    timer = null;
+  });
+  // Every in-app link: no browser link menu. Posts get ours instead.
+  addEventListener("contextmenu", (e) => {
+    const a = e.target.closest?.('a[href^="#"]');
+    if (!a) return;
+    e.preventDefault();
+    if (a.dataset.post && !sheetOpen()) begin(a);
+  });
+  // Lifting the finger after a long-press shouldn't also open the post.
+  addEventListener("click", (e) => {
+    if (Date.now() < swallowClick && e.target.closest?.("a[data-post]")) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
 }
 
 // ---------------------------------------------------------------- post view
@@ -658,9 +858,13 @@ async function renderPost(id) {
     h(
       "footer",
       { class: "reader-end" },
-      newer ? h("a", { class: "next", href: "#/p/" + newer.id }, "Next: " + newer.title) : h("a", { href: "#/" }, "Back to the feed"),
-      older ? h("a", { href: "#/p/" + older.id }, "Previous") : null,
-      p.url ? h("a", { href: p.url, target: "_blank", rel: "noopener noreferrer" }, "Comments on Patreon") : null
+      h(
+        "div",
+        { class: "reader-nav" },
+        newer ? h("a", { class: "next", href: "#/p/" + newer.id }, "Next: " + newer.title) : h("a", { href: "#/" }, "Back to the feed"),
+        older ? h("a", { href: "#/p/" + older.id }, "Previous") : null
+      ),
+      p.canView ? reactions(p) : null
     )
   );
   current = {
@@ -669,7 +873,7 @@ async function renderPost(id) {
   };
   view.replaceChildren(article);
   article.addEventListener("click", (e) => {
-    if (e.target.closest("a, button, input, select")) return;
+    if (e.target.closest("a, button, input, select, textarea, .comments")) return;
     if (String(getSelection()).length) return; // selecting text, not tapping
     toggleControls();
   });
@@ -683,6 +887,162 @@ async function renderPost(id) {
   // Resume where you left off: back to the saved paragraph, or the top.
   const saved = progress[id];
   restoreReader(typeof saved === "object" && saved.pct < 0.97 ? saved : null);
+}
+
+// Like button and comments, at the end of a chapter.
+function reactions(p) {
+  const like = h("button", { class: "like", type: "button" });
+  const paint = () => {
+    like.setAttribute("aria-pressed", String(!!p.liked));
+    like.setAttribute("aria-label", p.liked ? "Unlike" : "Like");
+    like.replaceChildren(h("span", { class: "heart", "aria-hidden": "true" }, p.liked ? "♥" : "♡"), p.likes ? " " + p.likes : "");
+  };
+  paint();
+  like.addEventListener("click", async () => {
+    const on = !p.liked;
+    const done = setLiked(p, on);
+    paint();
+    try {
+      await done;
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : "Couldn't reach Patreon.", 4000);
+    }
+    paint();
+  });
+
+  const panel = h("section", { class: "comments", "aria-label": "Comments", hidden: true });
+  const label = () => (p.comments ? `Comments (${p.comments})` : "Comments");
+  const toggle = h("button", { class: "comments-toggle", type: "button", "aria-expanded": "false" }, label());
+  toggle.addEventListener("click", () => {
+    const show = panel.hidden;
+    panel.hidden = !show;
+    toggle.setAttribute("aria-expanded", String(show));
+    if (show && !panel.childElementCount) loadComments(p, panel, () => (toggle.textContent = label()));
+  });
+  return h("div", { class: "reactions" }, h("div", { class: "reactions-row" }, like, toggle), panel);
+}
+
+const timeAgo = (iso) => {
+  const s = (Date.now() - Date.parse(iso)) / 1000;
+  if (!(s >= 0)) return "";
+  if (s < 3600) return Math.max(1, Math.round(s / 60)) + "m";
+  if (s < 86400) return Math.round(s / 3600) + "h";
+  if (s < 30 * 86400) return Math.round(s / 86400) + "d";
+  return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+};
+
+async function loadComments(p, panel, onCount) {
+  const list = h("ol", { class: "comment-list" });
+  const status = h("p", { class: "comments-note" }, "Loading comments…");
+  const more = h("button", { class: "more", type: "button", hidden: true }, "Older comments");
+  const composer = commentComposer(p, async () => {
+    // Show what's on Patreon now, including what you just wrote.
+    p.comments = (p.comments || 0) + 1;
+    await savePosts([{ meta: p }]);
+    onCount();
+    list.replaceChildren();
+    await page(null);
+  });
+  let next = null;
+  const page = async (cursor) => {
+    status.hidden = false;
+    status.textContent = "Loading comments…";
+    try {
+      const r = await fetchComments(p.id, cursor);
+      next = r.next;
+      list.append(...r.comments.map((c) => commentEl(c, composer)));
+      status.hidden = !!list.childElementCount;
+      status.textContent = "No comments yet.";
+    } catch (e) {
+      status.textContent = e instanceof ApiError ? e.message : "Couldn't load comments.";
+    }
+    more.hidden = !next;
+  };
+  more.addEventListener("click", async () => {
+    more.disabled = true;
+    await page(next);
+    more.disabled = false;
+  });
+  panel.replaceChildren(
+    composer.el,
+    status,
+    list,
+    more,
+    p.url ? h("p", { class: "comments-note" }, h("a", { href: p.url, target: "_blank", rel: "noopener noreferrer" }, "Open on Patreon")) : null
+  );
+  await page(null);
+}
+
+function commentEl(c, composer) {
+  const li = h(
+    "li",
+    { class: "comment" + (c.byCreator ? " by-creator" : "") },
+    h("div", { class: "comment-head" }, h("strong", {}, c.name), c.byCreator ? h("span", { class: "badge" }, "Creator") : null, h("span", { class: "when" }, timeAgo(c.created))),
+    // Plain text only: line breaks kept by CSS, nothing parsed as markup.
+    h("div", { class: "comment-body" }, c.body || h("em", {}, "Deleted"))
+  );
+  if (composer) li.append(h("button", { class: "reply-btn", type: "button", onclick: () => composer.replyTo(c, li) }, "Reply"));
+  if (c.replies.length) li.append(h("ol", { class: "replies" }, c.replies.map((r) => commentEl(r, null))));
+  if (c.replyCount > c.replies.length) li.append(h("p", { class: "comments-note" }, `${c.replyCount - c.replies.length} more ${c.replyCount - c.replies.length === 1 ? "reply" : "replies"} on Patreon`));
+  return li;
+}
+
+// One composer per chapter. Reply moves it under that comment; the draft is
+// kept on the device until it's sent.
+function commentComposer(p, onPosted) {
+  let parent = null;
+  let home = null;
+  const box = h("textarea", { class: "comment-input", rows: "3", placeholder: "Add a comment", "aria-label": "Your comment", maxlength: "10000" });
+  box.value = drafts[p.id] || "";
+  const replying = h("p", { class: "replying", hidden: true });
+  const cancel = h("button", { class: "secondary", type: "button", hidden: true }, "Cancel");
+  const send = h("button", { class: "primary", type: "button" }, "Post");
+  const el = h("div", { class: "composer" }, replying, box, h("div", { class: "composer-actions" }, cancel, send));
+  const setDraft = () => {
+    if (box.value.trim()) drafts[p.id] = box.value;
+    else delete drafts[p.id];
+    LS.set("drafts", drafts);
+    send.disabled = !box.value.trim();
+  };
+  setDraft();
+  box.addEventListener("input", setDraft);
+  const reset = () => {
+    parent = null;
+    replying.hidden = cancel.hidden = true;
+    box.placeholder = "Add a comment";
+    if (home) home.prepend(el);
+  };
+  cancel.addEventListener("click", reset);
+  send.addEventListener("click", async () => {
+    const text = box.value.trim();
+    if (!text) return;
+    send.disabled = true;
+    send.textContent = "Posting…";
+    try {
+      await postComment(p.id, text, parent?.id);
+      box.value = "";
+      setDraft();
+      reset();
+      toast("Comment posted.");
+      await onPosted();
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : "Couldn't reach Patreon.", 4000);
+    }
+    send.textContent = "Post";
+    send.disabled = !box.value.trim();
+  });
+  return {
+    el,
+    replyTo(c, li) {
+      home ||= el.parentNode;
+      parent = c;
+      replying.textContent = "Replying to " + c.name;
+      replying.hidden = cancel.hidden = false;
+      box.placeholder = "Write a reply";
+      li.append(el);
+      box.focus();
+    },
+  };
 }
 
 // ---------------------------------------------------------------- listening

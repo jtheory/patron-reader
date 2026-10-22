@@ -3,7 +3,9 @@
 A calm, mobile-first reader for the creators you support on Patreon. Just their posts, newest first, in a reading view built for long chapters. No discovery feed, no recommendations.
 
 - One chronological feed across all your creators, or one creator at a time
-- Unread markers, and "Next chapter" at the end of each post
+- Unread markers (and a half-filled ring for chapters you're partway through), and "Next chapter" at the end of each post
+- Like posts and read or write comments, at the end of each chapter
+- Hold a post in the feed for a menu: like, mark read or unread, more from that creator, share, open on Patreon
 - Remembers exactly where you were reading, even after your phone closes the app
 - Listen mode: reads posts aloud with your device's voices, following along paragraph by paragraph (while the app is open)
 - Works offline for posts it has already loaded
@@ -97,7 +99,7 @@ Open it from the home screen icon from then on, so it runs full-screen and keeps
 ### Layout
 
 - `app/`: the reader itself. Plain HTML, CSS and JavaScript; no build step.
-- `worker/`: the Cloudflare Worker. It serves `app/` and forwards `GET /api/*` to Patreon, adding the session cookie. It only allows `/api/*`, requires the `X-Proxy-Key` header, and stores nothing.
+- `worker/`: the Cloudflare Worker. It serves `app/` and forwards `GET /api/*` to Patreon, adding the session cookie. The only writes it passes on are liking, unliking and commenting (fetching Patreon's CSRF signature for each). It only allows `/api/*`, requires the `X-Proxy-Key` header, and stores nothing.
 - `scripts/smoke-test.mjs`: checks your session works and posts are readable, without deploying anything.
 
 ### Smoke test
@@ -126,4 +128,6 @@ Discovered with the smoke test; Patreon's internal API is undocumented and may c
 - **Your creators:** `/api/current_user?include=active_memberships.campaign` (everyone you follow, free or paid). `include=pledges.campaign` gives only those you pay.
 - **Posts:** `/api/posts?filter[campaign_id]=…&sort=-published_at`, paged via `links.next`.
 - **Post text** is in `content_json_string`: a ProseMirror-style JSON document (`doc › paragraph › text` with `bold`/`italic` marks). `content` is usually `null`.
+- **Likes:** `like_count` and `current_user_has_liked` on the post; `POST` / `DELETE /api/posts/{id}/likes` to like and unlike.
+- **Comments:** `comment_count` on the post; `/api/posts/{id}/comments` to read (replies come via `include=replies`); `POST /api/comments` with `post` (and for a reply, `parent`) relationships to write. Writes need an `X-CSRF-Signature` header, which the Worker scrapes from a Patreon page. These write endpoints are from the website's behaviour and haven't been confirmed with the smoke test, which only checks reading comments.
 - **Locked posts** have `current_user_can_view: false`. **Billing placeholders** have `is_automated_monthly_charge: true` and are hidden.

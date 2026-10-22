@@ -180,6 +180,31 @@ try {
     if (preview) console.log(`       ${preview.slice(0, 110)}${preview.length > 110 ? "…" : ""}`);
   }
   if (allTypes.size) console.log(`\n  Rich-text node types seen: ${[...allTypes].join(", ")}`);
+
+  // 4: likes and comments (read-only; the app also writes these).
+  const readable = list.find((p) => p.attributes?.current_user_can_view !== false);
+  if (readable) {
+    const a = readable.attributes || {};
+    console.log(`\n  "${a.title}": like_count=${a.like_count}, current_user_has_liked=${a.current_user_has_liked}, comment_count=${a.comment_count}`);
+    try {
+      const cs = await api(
+        `/api/posts/${readable.id}/comments?` +
+          qs({
+            include: "commenter,on_behalf_of,replies,replies.commenter,replies.on_behalf_of",
+            "fields[comment]": "body,created,deleted_at,is_by_creator,reply_count",
+            "fields[user]": "full_name",
+            "page[count]": "3",
+            sort: "-created",
+            "json-api-use-default-includes": "false",
+            "json-api-version": "1.0",
+          })
+      );
+      console.log(`✓ Comments readable: ${(cs.data || []).length} on the first page`);
+      for (const c of cs.data || []) console.log(`   - ${(c.attributes?.body || "").replace(/\s+/g, " ").slice(0, 90)}`);
+    } catch (e) {
+      console.log(`! Comments: ${e.message.split("\n")[0]}`);
+    }
+  }
   console.log("\nDone. If posts show 'readable', the whole approach works.");
 } catch (err) {
   console.error("✗ " + err.message);
