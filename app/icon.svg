@@ -1,7 +1,30 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" fill="#E8EBE3"/>
-  <path d="M136 132c46-14 92-10 120 14v238c-28-24-74-28-120-14z" fill="none" stroke="#1E2522" stroke-width="18" stroke-linejoin="round"/>
-  <path d="M376 132c-46-14-92-10-120 14v238c28-24 74-28 120-14z" fill="none" stroke="#1E2522" stroke-width="18" stroke-linejoin="round"/>
-  <path d="M168 190c22-5 44-4 62 4M168 236c22-5 44-4 62 4M168 282c22-5 44-4 62 4" stroke="#1E2522" stroke-width="12" stroke-linecap="round" opacity=".45"/>
-  <circle cx="318" cy="250" r="34" fill="#24406B"/>
+<rect width="512" height="512" fill="#E8EBE3"/>
+<g transform="translate(254 260) scale(0.94) translate(-276 -276)">
+<g transform="translate(34 34)">
+<path d="M150 120H276C338 120 372 160 372 212C372 264 338 304 276 304H226V400H150Z M226 178V246H270C292 246 304 232 304 212C304 192 292 178 270 178Z" fill="#1E2522" fill-rule="evenodd" stroke="#1E2522" stroke-width="6" stroke-linejoin="round" />
+</g>
+<path d="M147 117L147 403L147 403L147.1 404L147.2 405L147.3 406L147.4 407L147.5 408L147.7 409L148 410L148.3 411L148.6 412L149 413L149.5 414L150 415L150.7 416L151.4 417L152.2 418L153 419L154 420L155 421L156.2 422L157.4 423L158.7 424L160 425L161.5 426L163 427L164.6 428L166.3 429L168 430L169.7 431L171.5 432L173.4 433L175.3 434L177.2 435L179.1 436L181 437L205 437L171 117Z" fill="#1E2522"/>
+<g transform="translate(28.333 28.333)">
+<path d="M150 120H276C338 120 372 160 372 212C372 264 338 304 276 304H226V400H150Z M226 178V246H270C292 246 304 232 304 212C304 192 292 178 270 178Z" fill="#FBFCF8" fill-rule="evenodd" stroke="#1E2522" stroke-width="3.5" stroke-opacity=".8" stroke-linejoin="round" transform="translate(256 260) scale(.965) translate(-256 -260)"/>
+</g>
+<g transform="translate(22.667 22.667)">
+<path d="M150 120H276C338 120 372 160 372 212C372 264 338 304 276 304H226V400H150Z M226 178V246H270C292 246 304 232 304 212C304 192 292 178 270 178Z" fill="#FBFCF8" fill-rule="evenodd" stroke="#1E2522" stroke-width="3.5" stroke-opacity=".8" stroke-linejoin="round" transform="translate(256 260) scale(.965) translate(-256 -260)"/>
+</g>
+<g transform="translate(17 17)">
+<path d="M150 120H276C338 120 372 160 372 212C372 264 338 304 276 304H226V400H150Z M226 178V246H270C292 246 304 232 304 212C304 192 292 178 270 178Z" fill="#FBFCF8" fill-rule="evenodd" stroke="#1E2522" stroke-width="3.5" stroke-opacity=".8" stroke-linejoin="round" transform="translate(256 260) scale(.965) translate(-256 -260)"/>
+</g>
+<g transform="translate(11.333 11.333)">
+<path d="M150 120H276C338 120 372 160 372 212C372 264 338 304 276 304H226V400H150Z M226 178V246H270C292 246 304 232 304 212C304 192 292 178 270 178Z" fill="#FBFCF8" fill-rule="evenodd" stroke="#1E2522" stroke-width="3.5" stroke-opacity=".8" stroke-linejoin="round" transform="translate(256 260) scale(.965) translate(-256 -260)"/>
+</g>
+<g transform="translate(5.667 5.667)">
+<path d="M150 120H276C338 120 372 160 372 212C372 264 338 304 276 304H226V400H150Z M226 178V246H270C292 246 304 232 304 212C304 192 292 178 270 178Z" fill="#FBFCF8" fill-rule="evenodd" stroke="#1E2522" stroke-width="3.5" stroke-opacity=".8" stroke-linejoin="round" transform="translate(256 260) scale(.965) translate(-256 -260)"/>
+</g>
+<path d="M150 120H276C338 120 372 160 372 212C372 264 338 304 276 304H226V400H150Z M226 178V246H270C292 246 304 232 304 212C304 192 292 178 270 178Z" fill="#FBFCF8" fill-rule="evenodd" stroke="#1E2522" stroke-width="3.5" stroke-opacity=".8" stroke-linejoin="round" transform="translate(256 260) scale(.965) translate(-256 -260)"/>
+<path d="M150 120H276C338 120 372 160 372 212C372 264 338 304 276 304H226V400H150Z M226 178V246H270C292 246 304 232 304 212C304 192 292 178 270 178Z" fill="#1E2522" opacity=".22" fill-rule="evenodd" transform="translate(150 0) matrix(0.949 0 0 1 0 0) translate(-150 0)"/>
+<g transform="translate(150 0) matrix(0.898 -0.087 0 1 0 0) translate(-150 0)">
+<path d="M150 120H276C338 120 372 160 372 212C372 264 338 304 276 304H226V400H150Z M226 178V246H270C292 246 304 232 304 212C304 192 292 178 270 178Z" fill="#1E2522" fill-rule="evenodd" stroke="#1E2522" stroke-width="6" stroke-linejoin="round" />
+<path d="M172 128V392" stroke="#FBFCF8" stroke-opacity=".28" stroke-width="5"/>
+</g>
+</g>
 </svg>
