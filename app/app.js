@@ -937,13 +937,30 @@ function reactions(p) {
   const panel = h("section", { class: "comments", "aria-label": "Comments", hidden: true });
   const label = () => (p.comments ? `Comments (${p.comments})` : "Comments");
   const toggle = h("button", { class: "comments-toggle", type: "button", "aria-expanded": "false" }, label());
+  const row = h("div", { class: "reactions-row" }, like, toggle);
+  // Opening comments scrolls this row up under the top bar, so what opened
+  // is on screen. Once more when they've loaded (the page may have been too
+  // short to scroll that far), unless you've started scrolling yourself.
+  const reveal = () => scrollTo({
+    top: row.getBoundingClientRect().top + scrollY - barHeight() - 12,
+    behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+  });
   toggle.addEventListener("click", () => {
     const show = panel.hidden;
     panel.hidden = !show;
     toggle.setAttribute("aria-expanded", String(show));
-    if (show && !panel.childElementCount) loadComments(p, panel, () => (toggle.textContent = label()));
+    if (!show) return;
+    reveal();
+    if (panel.childElementCount) return;
+    let moved = false;
+    const mine = () => (moved = true);
+    for (const ev of ["touchstart", "wheel", "keydown"]) addEventListener(ev, mine, { once: true, passive: true });
+    loadComments(p, panel, () => (toggle.textContent = label())).then(() => {
+      for (const ev of ["touchstart", "wheel", "keydown"]) removeEventListener(ev, mine);
+      if (!moved && !panel.hidden) reveal();
+    });
   });
-  return h("div", { class: "reactions" }, h("div", { class: "reactions-row" }, like, toggle), panel);
+  return h("div", { class: "reactions" }, row, panel);
 }
 
 const timeAgo = (iso) => {
