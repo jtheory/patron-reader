@@ -92,8 +92,20 @@ async function likeTest(postId) {
     // The Worker does this part itself (see its X-Debug-Csrf header).
     console.log("CSRF signature from /home:");
     const { text } = await probe("GET", "/home", { Accept: "text/html" });
-    const sig = text.match(/"csrfSignature"\s*:\s*"([^"]+)"/)?.[1] || text.match(/csrf[-_]?signature["']?\s*[:=]\s*["']([^"']+)/i)?.[1];
+    // Same pattern as the Worker: plain or escaped JSON, or a JS assignment.
+    const sig = text.match(/csrf[-_]?signature\\*["']?\s*[:=]\s*\\*["']([^"'\\]+)/i)?.[1];
     console.log(sig ? "  ✓ found one" : "  ✗ none in the page");
+    if (!sig) {
+      // Where "csrf" does appear, with long values masked.
+      const re = /csrf/gi;
+      let m;
+      let n = 0;
+      while ((m = re.exec(text)) && n++ < 8) {
+        console.log("     …" + text.slice(Math.max(0, m.index - 40), m.index + 90).replace(/\s+/g, " ").replace(/[A-Za-z0-9+/=_.-]{20,}/g, (t) => `<${t.length}ch>`));
+        re.lastIndex = m.index + 90;
+      }
+      if (!n) console.log("     (the word csrf isn't in the page at all)");
+    }
     if (sig) extra["X-CSRF-Signature"] = sig;
   }
   const path = `/api/posts/${postId}/likes?json-api-version=1.0`;

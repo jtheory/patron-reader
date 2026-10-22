@@ -56,8 +56,30 @@ const WRITES = [
 const isAllowedWrite = (method, path) => WRITES.some((w) => w.method === method && w.path.test(path));
 
 // Patreon's website sends a CSRF signature with every write; it's embedded in
-// its pages. Fetch one for this session just before writing (writes are rare).
+// its pages, sometimes inside escaped JSON (\"csrfSignature\":\"…\").
+// Fetch one for this session just before writing (writes are rare).
 // `note` says how that went, for the X-Debug-Csrf header.
+const CSRF_RE = /csrf[-_]?signature\\*["']?\s*[:=]\s*\\*["']([^"'\\]+)/i;
+
+// When none is found: where "csrf" does appear (long values masked), the
+// cookies the page set (names only) and where it ended up after redirects.
+function csrfClues(html, res) {
+  const bits = [];
+  const re = /csrf/gi;
+  let m;
+  while ((m = re.exec(html)) && bits.length < 4) {
+    bits.push(html.slice(Math.max(0, m.index - 30), m.index + 70).replace(/[A-Za-z0-9+/=_.-]{20,}/g, (t) => `<${t.length}ch>`));
+    re.lastIndex = m.index + 70;
+  }
+  const cookies = (res.headers.getSetCookie?.() || []).map((c) => c.split("=")[0]);
+  let path = "";
+  try {
+    path = new URL(res.url).pathname;
+  } catch {}
+  return `page ${res.status} ${path}, ${html.length}ch; cookies: ${cookies.join(" ") || "none"}; ` +
+    (bits.length ? "csrf seen: " + bits.join(" | ") : "no csrf in page");
+}
+
 async function csrfSignature(env, headers) {
   try {
     const res = await fetch((env.UPSTREAM || UPSTREAM) + "/home", {
@@ -65,10 +87,12 @@ async function csrfSignature(env, headers) {
       redirect: "follow",
     });
     const html = await res.text();
-    const sig = html.match(/"csrfSignature"\s*:\s*"([^"]+)"/)?.[1] || html.match(/csrf[-_]?signature["']?\s*[:=]\s*["']([^"']+)/i)?.[1] || null;
+    const sig = html.match(CSRF_RE)?.[1] || null;
     const mitigated = res.headers.get("cf-mitigated");
-    return { sig, note: sig ? "found" : `missing; page ${res.status}${mitigated ? ", " + mitigated : ""}` };
-  } catch (e) {
+    const note = sig ? "found" : "missing; " + (mitigated ? mitigated + "; " : "") + csrfClues(html, res);
+    // Header values must be one line of plain ASCII.
+    return { sig, note: note.replace(/[^\x20-\x7e]/g, "?").slice(0, 1500) };
+  } catch {
     return { sig: null, note: "page fetch failed" };
   }
 }
