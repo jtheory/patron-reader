@@ -1,14 +1,16 @@
-/* Patron Reader — quiet paper, blue-black ink. */
+/* Patron Reader — crisp white page (light), quiet dark paper (dark), blue-black ink. */
 
 :root {
-  --paper: #E8EBE3;
-  --ink: #1E2522;
-  --quiet: #616B65;
-  --rule: #CDD3CA;
-  --accent: #24406B;        /* fountain-pen blue-black: unread, links, focus */
-  --locked: #9AA39C;
-  --wash: #DDE2D7;          /* pressed rows, inputs */
-  --error: #8A2F2F;
+  --paper: #FFFFFF;
+  --ink: #1A1C1E;
+  --quiet: #5F6368;
+  --rule: #E2E4E7;
+  --accent: #1F4F9A;        /* blue-black: unread, links, focus */
+  --locked: #A3A8AE;
+  --wash: #F1F3F4;          /* pressed rows, inputs */
+  --error: #B3261E;
+  --heart: #E0245E;         /* liked */
+  --heart-edge: #E0245E;
 
   --serif: Charter, "Iowan Old Style", "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif;
   --measure: 34rem;
@@ -27,6 +29,8 @@
     --locked: #5D6661;
     --wash: #222826;
     --error: #E08F8F;
+    --heart: #F0386B;
+    --heart-edge: #FFFFFF;
   }
 }
 :root[data-theme="dark"] {
@@ -38,6 +42,8 @@
   --locked: #5D6661;
   --wash: #222826;
   --error: #E08F8F;
+  --heart: #F0386B;
+  --heart-edge: #FFFFFF;
 }
 
 * { box-sizing: border-box; }
@@ -224,7 +230,10 @@ main { max-width: calc(var(--measure) + 2 * var(--gutter)); margin: 0 auto; }
 .post-row.locked .post-meta { color: var(--locked); }
 .lock { width: .8em; height: .8em; vertical-align: -.05em; margin-right: .3em; }
 .progress { color: var(--accent); }
-.liked-mark { color: var(--accent); }
+/* Hearts: an outline until liked, then filled red (white-edged in dark mode). */
+.heart { width: 1.25em; height: 1.25em; flex: none; vertical-align: -.25em; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
+.heart.on { fill: var(--heart); stroke: var(--heart-edge); stroke-width: 1.4; }
+.liked-mark .heart { width: 1em; height: 1em; vertical-align: -.12em; margin-right: .3em; }
 
 /* Long-press opens our menu: no text selection or iOS link preview on in-app links. */
 .post-row a, .chip, .bar a, .running-head, .reader-nav a {
@@ -358,10 +367,8 @@ main { max-width: calc(var(--measure) + 2 * var(--gutter)); margin: 0 auto; }
   color: var(--ink);
   cursor: pointer;
 }
-.like { font-variant-numeric: tabular-nums; }
-.like .heart { font-size: 1.15em; line-height: 1; color: var(--quiet); }
-.like[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
-.like[aria-pressed="true"] .heart { color: var(--accent); }
+.like { display: inline-flex; align-items: center; gap: .4rem; font-variant-numeric: tabular-nums; }
+.like[aria-pressed="true"] { border-color: var(--heart); }
 .like:active, .comments-toggle:active { background: var(--wash); }
 .comments-toggle[aria-expanded="true"] { border-color: var(--ink); }
 
@@ -453,6 +460,7 @@ main { max-width: calc(var(--measure) + 2 * var(--gutter)); margin: 0 auto; }
   cursor: pointer;
 }
 .sheet-item:active { background: var(--wash); }
+.sheet-item .heart { margin-right: .5rem; }
 .sheet-cancel { color: var(--quiet); border-top: 1px solid var(--rule); }
 
 /* ---------- settings ---------- */
@@ -643,6 +651,23 @@ html { overscroll-behavior-y: contain; } /* our pull-to-refresh, not the browser
   cursor: pointer;
 }
 .ct-play svg { width: 1.2rem; height: 1.2rem; }
+.ct-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 2.6rem;
+  height: 2.6rem;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: 50%;
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+.ct-icon svg { width: 1.3rem; height: 1.3rem; }
+.ct-icon .heart { vertical-align: 0; }
+.ct-icon:active { background: var(--wash); }
+.ct-play, .ct-icon, .ct-group { flex: none; }
+
 .ct-group {
   display: flex;
   align-items: center;

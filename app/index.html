@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Patron Reader</title>
-  <meta name="theme-color" content="#E8EBE3" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#191D1B" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -56,11 +56,8 @@
   <!-- Slides up when you tap a chapter. -->
   <div class="controls" id="controls" role="toolbar" aria-label="Reading controls" aria-hidden="true">
     <button class="ct-play" id="ct-play" type="button"></button>
-    <div class="ct-group" role="group" aria-label="Speed">
-      <button class="ct-btn" id="ct-slower" type="button" aria-label="Slower">−</button>
-      <span class="ct-value" id="ct-rate"></span>
-      <button class="ct-btn" id="ct-faster" type="button" aria-label="Faster">+</button>
-    </div>
+    <button class="ct-icon" id="ct-like" type="button" aria-label="Like"></button>
+    <button class="ct-icon" id="ct-comments" type="button" aria-label="Comments"></button>
     <div class="ct-group" role="group" aria-label="Text size">
       <button class="ct-btn ct-a" id="ct-smaller" type="button" aria-label="Smaller text">A−</button>
       <button class="ct-btn ct-a" id="ct-larger" type="button" aria-label="Larger text">A+</button>

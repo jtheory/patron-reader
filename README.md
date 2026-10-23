@@ -9,7 +9,7 @@ A calm, mobile-first reader for the creators you support on Patreon. Just their 
 - Remembers exactly where you were reading, even after your phone closes the app
 - Listen mode: reads posts aloud with your device's voices, following along paragraph by paragraph (while the app is open)
 - Works offline for posts it has already loaded
-- Light and dark themes; tap a chapter for text size and listening controls
+- Light and dark themes; tap a chapter for listening, like, comments and text size
 - Pull down on the feed to refresh (it also refreshes on its own when you come back after a while)
 - Installs to your home screen like an app
 
@@ -120,6 +120,8 @@ npm run dev       # app and proxy at http://localhost:8787
 ```
 
 The service worker only registers over HTTPS, so local reloads always get fresh files.
+
+On Android, Chrome paints the installed app's bottom navigation bar with the manifest's `background_color` (not `theme_color`, the page's `theme-color`, or `user_preferences`). It's dark so the bar always gets light icons, whatever the theme.
 
 ### What Patreon returns
 

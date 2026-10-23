@@ -514,6 +514,20 @@ function handleError(e) {
   if (e.kind === "setup") location.hash = "#/settings";
 }
 
+// Outline when not liked; filled red when liked (see .heart in style.css).
+const HEART_SVG = '<svg class="heart" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.3s-7.4-4.4-9.4-9.1C1.3 8 3.3 4.6 6.7 4.6c2.1 0 3.6 1.1 5.3 3 1.7-1.9 3.2-3 5.3-3 3.4 0 5.4 3.4 4.1 6.6-2 4.7-9.4 9.1-9.4 9.1z"/></svg>';
+const COMMENT_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 19 17h-8l-4.5 3.5V17H5a1.5 1.5 0 0 1-1.5-1.5v-9A1.5 1.5 0 0 1 5 5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
+const svgEl = (markup) => {
+  const t = document.createElement("template");
+  t.innerHTML = markup;
+  return t.content.firstChild;
+};
+const heartIcon = (liked) => {
+  const el = svgEl(HEART_SVG);
+  if (liked) el.classList.add("on");
+  return el;
+};
+
 const LOCK_SVG = '<svg class="lock" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5" fill="currentColor"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
 const lockIcon = () => {
   const t = document.createElement("template");
@@ -674,7 +688,7 @@ async function renderFeed(creatorId) {
             "span",
             { class: "post-meta" },
             h("span", {}, creator ? "" : byId.get(p.campaignId)?.name),
-            h("span", {}, p.liked ? h("span", { class: "liked-mark", "aria-label": "Liked" }, "♥ ") : null, right)
+            h("span", {}, p.liked ? h("span", { class: "liked-mark", role: "img", "aria-label": "Liked" }, heartIcon(true)) : null, right)
           )
         )
       )
@@ -734,9 +748,10 @@ async function openPostMenu(id) {
     if (route().name === "feed") render();
   };
   const item = (label, fn, cls) => h("button", { class: "sheet-item" + (cls ? " " + cls : ""), type: "button", onclick: () => done(fn) }, label);
+
   const items = [];
   if (p.canView) {
-    items.push(item(p.liked ? "♥ Unlike" : "♡ Like", () =>
+    items.push(item([heartIcon(p.liked), p.liked ? "Unlike" : "Like"], () =>
       setLiked(p, !p.liked).catch((e) => toast(e instanceof ApiError ? e.message : "Couldn't reach Patreon.", 4000))));
     if (!readSet[id]) {
       items.push(item("Mark as read", () => {
@@ -866,6 +881,8 @@ async function renderPost(id) {
   }
   article.append(bodyEl);
 
+  const react = p.canView ? reactions(p) : null;
+
   // Next / previous chapter: neighbours from the same creator, by date.
   const siblings = (await allPosts())
     .filter((x) => x.campaignId === p.campaignId && !x.billing)
@@ -884,11 +901,12 @@ async function renderPost(id) {
         newer ? h("a", { class: "next", href: "#/p/" + newer.id }, "Next: " + newer.title) : h("a", { href: "#/" }, "Back to the feed"),
         older ? h("a", { href: "#/p/" + older.id }, "Previous") : null
       ),
-      p.canView ? reactions(p) : null
+      react ? react.el : null
     )
   );
   current = {
     post: p,
+    react,
     listenable: !!(speech && p.canView && bodyEl.querySelector(".body > p, .body > blockquote, .body > h2, .body > h3, .body > ul, .body > ol")),
   };
   view.replaceChildren(article);
@@ -909,13 +927,15 @@ async function renderPost(id) {
   restoreReader(typeof saved === "object" && saved.pct < 0.97 ? saved : null);
 }
 
-// Like button and comments, at the end of a chapter.
+// Like button and comments, at the end of a chapter. The tap controls reach
+// them too, through the returned like() and openComments().
 function reactions(p) {
   const like = h("button", { class: "like", type: "button" });
   const paint = () => {
     like.setAttribute("aria-pressed", String(!!p.liked));
     like.setAttribute("aria-label", p.liked ? "Unlike" : "Like");
-    like.replaceChildren(h("span", { class: "heart", "aria-hidden": "true" }, p.liked ? "♥" : "♡"), p.likes ? " " + p.likes : "");
+    like.replaceChildren(heartIcon(p.liked), p.likes ? String(p.likes) : "");
+    updateControls();
   };
   paint();
   like.addEventListener("click", async () => {
@@ -956,7 +976,11 @@ function reactions(p) {
       if (!moved && !panel.hidden) reveal();
     });
   });
-  return h("div", { class: "reactions" }, row, panel);
+  return {
+    el: h("div", { class: "reactions" }, row, panel),
+    like: () => like.click(),
+    openComments: () => (panel.hidden ? toggle.click() : reveal()),
+  };
 }
 
 const timeAgo = (iso) => {
@@ -1221,7 +1245,8 @@ $("au-next").addEventListener("click", () => listening?.listener.jump(1));
 // ---------------------------------------------------------------- tap controls
 //
 // In a chapter, a tap (not a scroll, not on a link) slides up a bar with
-// play/pause, speed and text size. It hides after a few seconds, or on scroll.
+// play/pause, like, comments and text size. It hides after a few seconds, or
+// on scroll. (Listening speed is in Settings: it's set once, not per chapter.)
 
 let controlsTimer;
 let controlsHold = 0; // ignore scrolls we cause ourselves (keeping place on resize)
@@ -1232,9 +1257,13 @@ function updateControls() {
   $("ct-play").hidden = !canPlay;
   $("ct-play").innerHTML = isPlaying() ? PAUSE_SVG : PLAY_SVG;
   $("ct-play").setAttribute("aria-label", isPlaying() ? "Pause" : "Listen");
-  $("ct-rate").textContent = rateLabel(settings.rate);
-  $("ct-slower").disabled = settings.rate <= RATES[0];
-  $("ct-faster").disabled = settings.rate >= RATES.at(-1);
+  const p = current?.react ? current.post : null;
+  $("ct-like").hidden = $("ct-comments").hidden = !p;
+  if (p) {
+    $("ct-like").setAttribute("aria-pressed", String(!!p.liked));
+    $("ct-like").setAttribute("aria-label", p.liked ? "Unlike" : "Like");
+    $("ct-like").replaceChildren(heartIcon(p.liked));
+  }
 }
 
 function showControls() {
@@ -1264,16 +1293,15 @@ $("ct-play").addEventListener("click", () => {
   playPause();
   hideControls();
 });
-const stepRate = (dir) => {
-  const i = RATES.findIndex((r) => r >= settings.rate - 1e-9);
-  settings.rate = RATES[Math.max(0, Math.min(RATES.length - 1, (i < 0 ? RATES.length - 1 : i) + dir))];
-  saveSettings();
-  listening?.listener.setRate(settings.rate);
-  updateControls();
-  armControlsHide();
-};
-$("ct-slower").addEventListener("click", () => stepRate(-1));
-$("ct-faster").addEventListener("click", () => stepRate(1));
+$("ct-like").addEventListener("click", () => {
+  current?.react?.like();
+  armControlsHide(); // stay up a moment so the heart change is seen
+});
+$("ct-comments").addEventListener("click", () => {
+  hideControls();
+  current?.react?.openComments();
+});
+$("ct-comments").innerHTML = COMMENT_SVG;
 const stepSize = (delta) => {
   const spot = readerSpot(); // keep the same paragraph at the top while text reflows
   settings.size = Math.min(1.6, Math.max(0.95, +(settings.size + delta).toFixed(4)));
@@ -1376,6 +1404,9 @@ function renderSettings() {
   const paidOnly = h("input", { id: "f-paid", type: "checkbox", checked: settings.paidOnly });
   const hideLocked = h("input", { id: "f-locked", type: "checkbox", checked: settings.hideLocked });
   const voice = h("select", { id: "f-voice" }, h("option", { value: "" }, "Device default"));
+  // Snap an old in-between value to the nearest listed speed.
+  const nearest = RATES.reduce((a, b) => (Math.abs(b - settings.rate) < Math.abs(a - settings.rate) ? b : a));
+  const rate = h("select", { id: "f-rate" }, RATES.map((r) => h("option", { value: String(r), selected: r === nearest }, rateLabel(r))));
   const fillVoices = () => {
     const list = (speech?.voices() || []).slice().sort((a, b) => a.lang.localeCompare(b.lang) || a.name.localeCompare(b.name));
     const lang = (navigator.language || "en").slice(0, 2);
@@ -1406,6 +1437,7 @@ function renderSettings() {
       hideLocked: hideLocked.checked,
       theme: theme.value,
       voice: voice.value,
+      rate: +rate.value,
     });
     saveSettings();
     applyLook();
@@ -1426,7 +1458,7 @@ function renderSettings() {
       save();
     });
   }
-  for (const el of [paidOnly, hideLocked, theme, voice]) el.addEventListener("change", save);
+  for (const el of [paidOnly, hideLocked, theme, voice, rate]) el.addEventListener("change", save);
 
   const form = h(
     "form",
@@ -1466,36 +1498,14 @@ function renderSettings() {
       ? h("div", { class: "field" }, h("label", { for: "f-voice" }, "Listening voice"), voice,
           h("p", { class: "hint" }, "More voices: Android Settings › Accessibility › Text-to-speech output."))
       : null,
+    speech ? h("div", { class: "field" }, h("label", { for: "f-rate" }, "Listening speed"), rate) : null,
     settings.session ? signOutButton() : null
   );
   const trouble = troubleshootingSection();
   if (trouble) form.append(trouble);
-  form.append(screenSection());
   // A new device most likely wants to scan; one that's set up offers its code.
   if (settings.session && settings.key) view.replaceChildren(form, deviceSection());
   else view.replaceChildren(receiveSection(), form);
-}
-
-// How Chrome has laid out the app window: for chasing system-bar problems.
-// A safe-area bottom above 0 means the page reaches under Android's nav bar.
-function screenSection() {
-  const probe = h("div", { style: "position:fixed;visibility:hidden;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)" });
-  document.body.append(probe);
-  const cs = getComputedStyle(probe);
-  const mode = ["fullscreen", "standalone", "minimal-ui", "browser"].find((m) => matchMedia(`(display-mode: ${m})`).matches) || "?";
-  const text = [
-    `display-mode: ${mode}`,
-    `window: ${innerWidth}x${innerHeight} (outer ${outerWidth}x${outerHeight}, visual ${Math.round(visualViewport?.height || 0)})`,
-    `screen: ${screen.width}x${screen.height} avail ${screen.availWidth}x${screen.availHeight} @${devicePixelRatio}x`,
-    `safe-area: top ${cs.paddingTop}, bottom ${cs.paddingBottom}`,
-    `device dark: ${matchMedia("(prefers-color-scheme: dark)").matches}, app theme: ${settings.theme}`,
-    `chrome: ${navigator.userAgent.match(/Chrome\/([\d.]+)/)?.[1] || "?"}`,
-  ].join("\n");
-  probe.remove();
-  const copy = h("button", { class: "secondary", type: "button" }, "Copy details");
-  copy.addEventListener("click", () =>
-    navigator.clipboard.writeText(text).then(() => (copy.textContent = "Copied"), () => (copy.textContent = "Couldn't copy")));
-  return h("details", { class: "trouble" }, h("summary", {}, "Troubleshooting: screen details"), h("pre", {}, text), h("div", { class: "trouble-actions" }, copy));
 }
 
 // The last request Patreon refused, in full, to copy into a bug report.
