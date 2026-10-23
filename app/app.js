@@ -1470,9 +1470,32 @@ function renderSettings() {
   );
   const trouble = troubleshootingSection();
   if (trouble) form.append(trouble);
+  form.append(screenSection());
   // A new device most likely wants to scan; one that's set up offers its code.
   if (settings.session && settings.key) view.replaceChildren(form, deviceSection());
   else view.replaceChildren(receiveSection(), form);
+}
+
+// How Chrome has laid out the app window: for chasing system-bar problems.
+// A safe-area bottom above 0 means the page reaches under Android's nav bar.
+function screenSection() {
+  const probe = h("div", { style: "position:fixed;visibility:hidden;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)" });
+  document.body.append(probe);
+  const cs = getComputedStyle(probe);
+  const mode = ["fullscreen", "standalone", "minimal-ui", "browser"].find((m) => matchMedia(`(display-mode: ${m})`).matches) || "?";
+  const text = [
+    `display-mode: ${mode}`,
+    `window: ${innerWidth}x${innerHeight} (outer ${outerWidth}x${outerHeight}, visual ${Math.round(visualViewport?.height || 0)})`,
+    `screen: ${screen.width}x${screen.height} avail ${screen.availWidth}x${screen.availHeight} @${devicePixelRatio}x`,
+    `safe-area: top ${cs.paddingTop}, bottom ${cs.paddingBottom}`,
+    `device dark: ${matchMedia("(prefers-color-scheme: dark)").matches}, app theme: ${settings.theme}`,
+    `chrome: ${navigator.userAgent.match(/Chrome\/([\d.]+)/)?.[1] || "?"}`,
+  ].join("\n");
+  probe.remove();
+  const copy = h("button", { class: "secondary", type: "button" }, "Copy details");
+  copy.addEventListener("click", () =>
+    navigator.clipboard.writeText(text).then(() => (copy.textContent = "Copied"), () => (copy.textContent = "Couldn't copy")));
+  return h("details", { class: "trouble" }, h("summary", {}, "Troubleshooting: screen details"), h("pre", {}, text), h("div", { class: "trouble-actions" }, copy));
 }
 
 // The last request Patreon refused, in full, to copy into a bug report.
