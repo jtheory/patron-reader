@@ -5,10 +5,10 @@
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#FF00FF",
-  "theme_color": "#00FFFF",
+  "background_color": "#191D1B",
+  "theme_color": "#E8EBE3",
   "user_preferences": {
-    "color_scheme_dark": { "background_color": "#FFFF00", "theme_color": "#00FF00" }
+    "color_scheme_dark": { "background_color": "#191D1B", "theme_color": "#191D1B" }
   },
   "icons": [
     { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
