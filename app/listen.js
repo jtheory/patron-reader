@@ -11,8 +11,29 @@ export function webSpeechEngine() {
   const synth = window.speechSynthesis;
   if (!synth || typeof SpeechSynthesisUtterance === "undefined") return null;
   let current = null;
+  let epoch = 0; // bumped by cancel(), so a sentence still waiting for voices is dropped
+  // Chrome loads its voice list in the background: right after launch it's
+  // often empty, and an utterance without a voice gets the device default
+  // (e.g. American English for the first sentence, then the chosen voice).
+  // So wait for the list before the first sentence, but not forever.
+  let loading = null;
+  const voicesReady = () => {
+    if (synth.getVoices().length) return Promise.resolve();
+    loading ||= new Promise((resolve) => {
+      const done = () => {
+        synth.removeEventListener?.("voiceschanged", done);
+        resolve();
+      };
+      synth.addEventListener?.("voiceschanged", done);
+      setTimeout(done, 2000);
+    });
+    return loading;
+  };
   return {
-    speak(text, { rate = 1, voice = "" } = {}) {
+    async speak(text, { rate = 1, voice = "" } = {}) {
+      const mine = epoch;
+      if (voice) await voicesReady();
+      if (mine !== epoch) return;
       return new Promise((resolve, reject) => {
         const u = new SpeechSynthesisUtterance(text);
         u.rate = rate;
@@ -28,6 +49,7 @@ export function webSpeechEngine() {
       });
     },
     cancel() {
+      epoch++;
       current = null;
       synth.cancel();
     },
