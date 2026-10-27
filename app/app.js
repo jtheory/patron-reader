@@ -346,14 +346,27 @@ async function fetchComments(postId, next) {
   return { comments: top.map(shape), next: toPath(r.links?.next) };
 }
 
-// Liking a comment. Patreon doesn't document this; the endpoint mirrors post
-// likes and is a best guess until confirmed against the website's own request.
+// Liking a comment is a "vote", as the website sends it: vote "1" to like.
+// Un-liking as vote "0" is a guess (not yet seen from the website).
 async function setCommentLiked(c, on) {
   if (c.liked === on) return;
   const before = { liked: c.liked, likes: c.likes };
   Object.assign(c, { liked: on, likes: Math.max(0, c.likes + (on ? 1 : -1)) });
   try {
-    await api(`/api/comments/${c.id}/likes?json-api-version=1.0`, { method: on ? "POST" : "DELETE" });
+    await api(`/api/comments/${c.id}/votes?` + qs({
+      "json-api-version": "1.0",
+      "json-api-use-default-includes": "false",
+      "json-api-use-default-fields": "false",
+    }), {
+      method: "POST",
+      body: {
+        data: {
+          type: "comment-vote",
+          attributes: { vote: on ? "1" : "0" },
+          relationships: { comment: { data: { type: "comment", id: c.id } } },
+        },
+      },
+    });
   } catch (e) {
     Object.assign(c, before);
     throw e;
