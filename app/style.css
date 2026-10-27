@@ -262,7 +262,8 @@ main { max-width: calc(var(--measure) + 2 * var(--gutter)); margin: 0 auto; }
 /* ---------- reader ---------- */
 
 .reader {
-  padding: 1.5rem var(--gutter) 3rem;
+  /* Room at the end for the controls bar, which comes up there on its own. */
+  padding: 1.5rem var(--gutter) calc(6.5rem + env(safe-area-inset-bottom));
   font-size: var(--reader-size);
 }
 .running-head {

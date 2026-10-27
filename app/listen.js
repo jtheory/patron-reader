@@ -2,7 +2,7 @@
 //
 // The speech engine is a small interface so a native app can swap in Android's
 // TextToSpeech later without touching the reader:
-//   engine.speak(text, { rate, voice }) -> Promise (resolves when finished)
+//   engine.speak(text, { rate, voice, lang }) -> Promise (resolves when finished)
 //   engine.cancel()
 //   engine.voices() -> [{ id, name, lang, isDefault }]
 //   engine.speaking() -> boolean
@@ -16,32 +16,42 @@ export function webSpeechEngine() {
   // often empty, and an utterance without a voice gets the device default
   // (e.g. American English for the first sentence, then the chosen voice).
   // So wait for the list before the first sentence, but not forever.
-  let loading = null;
-  const voicesReady = () => {
-    if (synth.getVoices().length) return Promise.resolve();
-    loading ||= new Promise((resolve) => {
-      const done = () => {
-        synth.removeEventListener?.("voiceschanged", done);
+  // The list can also arrive in parts, so wait for the chosen voice itself.
+  // Give up after 2s (the voice may have been uninstalled) and don't wait for
+  // that voice again; the utterance's language still steers the engine.
+  const find = (id) => synth.getVoices().find((x) => x.voiceURI === id);
+  const missing = new Set();
+  const voiceReady = (id) => {
+    if (find(id) || missing.has(id)) return Promise.resolve();
+    return new Promise((resolve) => {
+      const check = () => find(id) && finish();
+      const finish = () => {
+        synth.removeEventListener?.("voiceschanged", check);
+        clearInterval(poll);
+        clearTimeout(timer);
         resolve();
       };
-      synth.addEventListener?.("voiceschanged", done);
-      setTimeout(done, 2000);
+      synth.addEventListener?.("voiceschanged", check);
+      const poll = setInterval(check, 100); // not every build fires voiceschanged
+      const timer = setTimeout(() => {
+        missing.add(id);
+        finish();
+      }, 2000);
     });
-    return loading;
   };
   return {
-    async speak(text, { rate = 1, voice = "" } = {}) {
+    async speak(text, { rate = 1, voice = "", lang = "" } = {}) {
       const mine = epoch;
-      if (voice) await voicesReady();
+      if (voice) await voiceReady(voice);
       if (mine !== epoch) return;
       return new Promise((resolve, reject) => {
         const u = new SpeechSynthesisUtterance(text);
         u.rate = rate;
-        const v = voice && synth.getVoices().find((x) => x.voiceURI === voice);
+        const v = voice && find(voice);
         if (v) {
           u.voice = v;
           u.lang = v.lang;
-        }
+        } else if (lang) u.lang = lang;
         u.onend = () => resolve();
         u.onerror = (e) => (e.error === "interrupted" || e.error === "canceled" ? resolve() : reject(e.error));
         current = u; // keep a reference: Chrome can garbage-collect live utterances
@@ -104,6 +114,7 @@ export class Listener {
     this.state = "stopped"; // stopped | playing | paused
     this.rate = 1;
     this.voice = "";
+    this.lang = ""; // the voice's language, used if the voice itself isn't available
     this.gen = 0; // bumped on every interruption so stale callbacks are ignored
   }
 
@@ -133,7 +144,7 @@ export class Listener {
         // Remember where each sentence started, to resume accurately after interruptions.
         this.at = { index: this.index, part: this.part, t: Date.now(), prev: this.at && { ...this.at, prev: null } };
         try {
-          await this.engine.speak(parts[this.part], { rate: this.rate, voice: this.voice });
+          await this.engine.speak(parts[this.part], { rate: this.rate, voice: this.voice, lang: this.lang });
         } catch {
           // Engine error: stop rather than race through the text silently.
           if (gen === this.gen) this.pause();

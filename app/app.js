@@ -16,6 +16,7 @@ const DEFAULTS = {
   size: 1.1875,      // reader font size, rem
   rate: 1,           // listening speed
   voice: "",         // voice id; "" = device default
+  voiceLang: "",     // that voice's language, e.g. "en-GB"
 };
 const LS = {
   get(k, d) {
@@ -579,7 +580,10 @@ function setBar(r) {
 async function render() {
   const r = route();
   setBar(r);
-  if (r.name !== "post") hideControls();
+  if (r.name !== "post") {
+    hideControls();
+    watchEnd(null);
+  }
   if (r.name === "settings") return renderSettings();
   if (r.name === "post") return renderPost(r.id);
   return renderFeed(r.creator);
@@ -910,6 +914,7 @@ async function renderPost(id) {
     listenable: !!(speech && p.canView && bodyEl.querySelector(".body > p, .body > blockquote, .body > h2, .body > h3, .body > ul, .body > ol")),
   };
   view.replaceChildren(article);
+  watchEnd(article.querySelector(".reader-nav"));
   article.addEventListener("click", (e) => {
     if (e.target.closest("a, button, input, select, textarea, .comments")) return;
     if (String(getSelection()).length) return; // selecting text, not tapping
@@ -1130,6 +1135,7 @@ function startListening(p, index) {
   });
   listener.rate = settings.rate;
   listener.voice = settings.voice;
+  listener.lang = settings.voiceLang || speech.voices().find((v) => v.id === settings.voice)?.lang || "";
   listening = { postId: p.id, title: p.title, listener };
   listener.start(blockEls().map((el) => (el.tagName === "IMG" || el.tagName === "HR" ? "" : el.textContent)), index);
 }
@@ -1282,11 +1288,40 @@ function hideControls() {
   document.body.classList.remove("has-controls");
 }
 function toggleControls() {
-  controlsOpen() ? hideControls() : showControls();
+  if (controlsOpen()) {
+    hideControls();
+    endDismissed = atEnd; // tapped away at the end: leave them down until next time
+  } else {
+    endDismissed = false;
+    showControls();
+  }
 }
 function armControlsHide() {
   clearTimeout(controlsTimer);
-  controlsTimer = setTimeout(hideControls, 4000);
+  if (!holdAtEnd()) controlsTimer = setTimeout(hideControls, 4000);
+}
+
+// At the end of a chapter (the Next / Previous row on screen) the controls
+// come up on their own and stay: no timer, no hiding on scroll. A tap still
+// hides them. Scrolling back up into the text lets them go as usual.
+let atEnd = false;
+let endDismissed = false;
+let endObserver = null;
+const holdAtEnd = () => atEnd && !endDismissed;
+function watchEnd(el) {
+  endObserver?.disconnect();
+  atEnd = endDismissed = false;
+  if (!el || !("IntersectionObserver" in window)) return;
+  endObserver = new IntersectionObserver(([e]) => {
+    atEnd = e.isIntersecting;
+    if (holdAtEnd()) showControls();
+    if (!atEnd) {
+      endDismissed = false;
+      // Back up into the text: go now, unless the move came from a text-size change.
+      if (controlsOpen()) Date.now() > controlsHold ? hideControls() : armControlsHide();
+    }
+  });
+  endObserver.observe(el);
 }
 
 $("ct-play").addEventListener("click", () => {
@@ -1315,7 +1350,7 @@ $("ct-smaller").addEventListener("click", () => stepSize(-0.0625));
 $("ct-larger").addEventListener("click", () => stepSize(0.0625));
 
 addEventListener("scroll", () => {
-  if (controlsOpen() && Date.now() > pinUntil && Date.now() > controlsHold) hideControls();
+  if (controlsOpen() && !holdAtEnd() && Date.now() > pinUntil && Date.now() > controlsHold) hideControls();
   if (listeningHere() && listening.listener.state === "paused") updatePlayer();
 }, { passive: true });
 
@@ -1437,6 +1472,7 @@ function renderSettings() {
       hideLocked: hideLocked.checked,
       theme: theme.value,
       voice: voice.value,
+      voiceLang: (speech?.voices() || []).find((v) => v.id === voice.value)?.lang || "",
       rate: +rate.value,
     });
     saveSettings();
