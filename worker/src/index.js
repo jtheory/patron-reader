@@ -52,6 +52,8 @@ const WRITES = [
   { method: "POST", path: /^\/api\/posts\/\d+\/likes$/ },    // like a post
   { method: "DELETE", path: /^\/api\/posts\/\d+\/likes$/ },  // unlike it
   { method: "POST", path: /^\/api\/comments$/ },              // comment or reply
+  { method: "POST", path: /^\/api\/comments\/\d+\/likes$/ }, // like a comment (endpoint unconfirmed)
+  { method: "DELETE", path: /^\/api\/comments\/\d+\/likes$/ },
 ];
 const isAllowedWrite = (method, path) => WRITES.some((w) => w.method === method && w.path.test(path));
 

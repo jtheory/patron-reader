@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <title>Patron Reader</title>
   <meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#191D1B" media="(prefers-color-scheme: dark)">
@@ -63,6 +63,17 @@
       <button class="ct-btn ct-a" id="ct-larger" type="button" aria-label="Larger text">A+</button>
     </div>
   </div>
+
+  <!-- Comments for the chapter on screen; the chapter stays readable above. -->
+  <aside class="drawer" id="drawer" aria-labelledby="drawer-title" hidden>
+    <header class="drawer-head">
+      <h2 class="drawer-title" id="drawer-title">Comments</h2>
+      <button class="icon-btn" id="drawer-close" type="button" aria-label="Close comments" title="Close">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </header>
+    <div class="drawer-body" id="drawer-body"></div>
+  </aside>
 
   <!-- Hold a post in the feed: our menu instead of the browser's link menu. -->
   <div class="sheet" id="sheet" hidden></div>

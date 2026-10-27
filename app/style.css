@@ -371,9 +371,70 @@ main { max-width: calc(var(--measure) + 2 * var(--gutter)); margin: 0 auto; }
 .like { display: inline-flex; align-items: center; gap: .4rem; font-variant-numeric: tabular-nums; }
 .like[aria-pressed="true"] { border-color: var(--heart); }
 .like:active, .comments-toggle:active { background: var(--wash); }
-.comments-toggle[aria-expanded="true"] { border-color: var(--ink); }
 
-.comments { margin-top: 1.25rem; font-size: 1rem; line-height: 1.5; }
+/* ---------- comments drawer ---------- */
+
+.drawer {
+  /* Lower part of the screen; the chapter stays readable (and scrollable) above.
+     With the keyboard up the viewport shrinks, and the drawer with it. */
+  --drawer-h: min(62dvh, 36rem);
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  height: var(--drawer-h);
+  max-width: calc(var(--measure) + 2 * var(--gutter));
+  margin: 0 auto;
+  border-radius: 14px 14px 0 0;
+  border: 1px solid var(--rule);
+  border-bottom: 0;
+  background: var(--paper);
+  box-shadow: 0 -8px 28px rgba(10, 14, 12, .22);
+  transform: translateY(100%);
+  transition: transform .22s ease;
+}
+.drawer.show { transform: none; }
+@media (prefers-reduced-motion: reduce) { .drawer { transition: none; } }
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .35rem .5rem .35rem var(--gutter);
+  border-bottom: 1px solid var(--rule);
+}
+.drawer-title { margin: 0; font-size: 1.0625rem; }
+.drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain; /* scrolling comments doesn't scroll the chapter */
+  padding: .9rem var(--gutter) calc(1.25rem + env(safe-area-inset-bottom));
+  font-size: 1rem;
+  line-height: 1.5;
+}
+/* Room to read the chapter's end above the open drawer. */
+body.has-drawer main { padding-bottom: min(62dvh, 36rem); }
+
+.comment-actions { display: flex; align-items: center; gap: .25rem; margin-top: .2rem; }
+.comment-like {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  min-height: 2.25rem;
+  padding: .3rem .5rem;
+  margin-left: -.5rem;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--quiet);
+  font-size: .875rem;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.comment-like .heart { width: 1.05rem; height: 1.05rem; }
+.comment-like:active { background: var(--wash); }
 .comments-note { color: var(--quiet); font-size: .9375rem; }
 .composer { margin: 0 0 1.25rem; }
 .comment-input {
@@ -397,7 +458,7 @@ main { max-width: calc(var(--measure) + 2 * var(--gutter)); margin: 0 auto; }
 .badge { font-size: .75rem; padding: .05rem .45rem; border-radius: 999px; background: var(--accent); color: var(--paper); }
 .comment-body { margin-top: .2rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 .reply-btn {
-  margin: .2rem 0 0 -.5rem;
+  margin: 0;
   padding: .4rem .5rem;
   border: 0;
   background: none;

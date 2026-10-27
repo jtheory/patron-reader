@@ -307,7 +307,7 @@ async function setLiked(p, on) {
 function commentsPath(postId) {
   return `/api/posts/${postId}/comments?` + qs({
     include: "commenter,on_behalf_of,replies,replies.commenter,replies.on_behalf_of",
-    "fields[comment]": "body,created,deleted_at,is_by_creator,reply_count",
+    "fields[comment]": "body,created,deleted_at,is_by_creator,reply_count,vote_sum,current_user_vote",
     "fields[user]": "full_name",
     "fields[campaign]": "name",
     "page[count]": "20",
@@ -333,6 +333,8 @@ async function fetchComments(postId, next) {
       byCreator: !!a.is_by_creator || !!asCreator,
       name: asCreator?.attributes?.name || ref(rel.commenter)?.attributes?.full_name || "Someone",
       replyCount: a.reply_count || 0,
+      likes: Math.max(0, a.vote_sum || 0),
+      liked: (a.current_user_vote || 0) > 0,
       replies: (rel.replies?.data || [])
         .map((d) => inc.get("comment:" + d.id))
         .filter(Boolean)
@@ -342,6 +344,20 @@ async function fetchComments(postId, next) {
   };
   const top = (r.data || []).filter((c) => !c.relationships?.parent?.data);
   return { comments: top.map(shape), next: toPath(r.links?.next) };
+}
+
+// Liking a comment. Patreon doesn't document this; the endpoint mirrors post
+// likes and is a best guess until confirmed against the website's own request.
+async function setCommentLiked(c, on) {
+  if (c.liked === on) return;
+  const before = { liked: c.liked, likes: c.likes };
+  Object.assign(c, { liked: on, likes: Math.max(0, c.likes + (on ? 1 : -1)) });
+  try {
+    await api(`/api/comments/${c.id}/likes?json-api-version=1.0`, { method: on ? "POST" : "DELETE" });
+  } catch (e) {
+    Object.assign(c, before);
+    throw e;
+  }
 }
 
 function postComment(postId, text, parentId) {
@@ -584,6 +600,7 @@ async function render() {
     hideControls();
     watchEnd(null);
   }
+  if (r.name !== "post" || r.id !== drawerPost) resetDrawer();
   if (r.name === "settings") return renderSettings();
   if (r.name === "post") return renderPost(r.id);
   return renderFeed(r.creator);
@@ -916,7 +933,7 @@ async function renderPost(id) {
   view.replaceChildren(article);
   watchEnd(article.querySelector(".reader-nav"));
   article.addEventListener("click", (e) => {
-    if (e.target.closest("a, button, input, select, textarea, .comments")) return;
+    if (e.target.closest("a, button, input, select, textarea") || drawerOpen()) return;
     if (String(getSelection()).length) return; // selecting text, not tapping
     toggleControls();
   });
@@ -955,38 +972,65 @@ function reactions(p) {
     paint();
   });
 
-  const panel = h("section", { class: "comments", "aria-label": "Comments", hidden: true });
   const label = () => (p.comments ? `Comments (${p.comments})` : "Comments");
-  const toggle = h("button", { class: "comments-toggle", type: "button", "aria-expanded": "false" }, label());
-  const row = h("div", { class: "reactions-row" }, like, toggle);
-  // Opening comments scrolls this row up under the top bar, so what opened
-  // is on screen. Once more when they've loaded (the page may have been too
-  // short to scroll that far), unless you've started scrolling yourself.
-  const reveal = () => scrollTo({
-    top: row.getBoundingClientRect().top + scrollY - barHeight() - 12,
-    behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+  const toggle = h("button", { class: "comments-toggle", type: "button" }, label());
+  const open = () => openDrawer(p, () => {
+    toggle.textContent = label();
+    $("drawer-title").textContent = label();
   });
-  toggle.addEventListener("click", () => {
-    const show = panel.hidden;
-    panel.hidden = !show;
-    toggle.setAttribute("aria-expanded", String(show));
-    if (!show) return;
-    reveal();
-    if (panel.childElementCount) return;
-    let moved = false;
-    const mine = () => (moved = true);
-    for (const ev of ["touchstart", "wheel", "keydown"]) addEventListener(ev, mine, { once: true, passive: true });
-    loadComments(p, panel, () => (toggle.textContent = label())).then(() => {
-      for (const ev of ["touchstart", "wheel", "keydown"]) removeEventListener(ev, mine);
-      if (!moved && !panel.hidden) reveal();
-    });
-  });
+  toggle.addEventListener("click", open);
   return {
-    el: h("div", { class: "reactions" }, row, panel),
+    el: h("div", { class: "reactions" }, h("div", { class: "reactions-row" }, like, toggle), null),
     like: () => like.click(),
-    openComments: () => (panel.hidden ? toggle.click() : reveal()),
+    openComments: open,
   };
 }
+
+// ---------------------------------------------------------------- comments drawer
+//
+// Comments open in a drawer over the lower part of the screen, so you can
+// read on above it: e.g. collect typos into a draft while reading, then post
+// once at the end. The chapter stays where it is. Android's back button
+// closes the drawer rather than leaving the chapter. Its contents (and the
+// draft) stay put while you're on this chapter.
+
+const drawer = $("drawer");
+let drawerPost = null; // the chapter whose comments the drawer holds
+const drawerOpen = () => !drawer.hidden;
+
+function openDrawer(p, onCount) {
+  hideControls();
+  if (drawerPost !== p.id) {
+    drawerPost = p.id;
+    $("drawer-title").textContent = p.comments ? `Comments (${p.comments})` : "Comments";
+    loadComments(p, $("drawer-body"), onCount);
+  }
+  if (drawerOpen()) return;
+  drawer.hidden = false;
+  document.body.classList.add("has-drawer");
+  requestAnimationFrame(() => drawer.classList.add("show"));
+  history.pushState({ drawer: true }, "", location.href);
+}
+
+function closeDrawer() {
+  if (!drawerOpen()) return;
+  if (history.state?.drawer) return history.back(); // popstate below closes it
+  hideDrawer();
+}
+function hideDrawer() {
+  drawer.classList.remove("show");
+  drawer.hidden = true;
+  document.body.classList.remove("has-drawer");
+}
+// Leaving the chapter: empty it, so the next chapter loads its own comments.
+function resetDrawer() {
+  hideDrawer();
+  drawerPost = null;
+  $("drawer-body").replaceChildren();
+}
+addEventListener("popstate", () => drawerOpen() && !history.state?.drawer && hideDrawer());
+$("drawer-close").addEventListener("click", closeDrawer);
+addEventListener("keydown", (e) => e.key === "Escape" && closeDrawer());
 
 const timeAgo = (iso) => {
   const s = (Date.now() - Date.parse(iso)) / 1000;
@@ -1047,10 +1091,34 @@ function commentEl(c, composer) {
     // Plain text only: line breaks kept by CSS, nothing parsed as markup.
     h("div", { class: "comment-body" }, c.body || h("em", {}, "Deleted"))
   );
-  if (composer) li.append(h("button", { class: "reply-btn", type: "button", onclick: () => composer.replyTo(c, li) }, "Reply"));
+  const actions = h("div", { class: "comment-actions" });
+  if (c.body) actions.append(commentLike(c));
+  if (composer) actions.append(h("button", { class: "reply-btn", type: "button", onclick: () => composer.replyTo(c, li) }, "Reply"));
+  if (actions.childElementCount) li.append(actions);
   if (c.replies.length) li.append(h("ol", { class: "replies" }, c.replies.map((r) => commentEl(r, null))));
   if (c.replyCount > c.replies.length) li.append(h("p", { class: "comments-note" }, `${c.replyCount - c.replies.length} more ${c.replyCount - c.replies.length === 1 ? "reply" : "replies"} on Patreon`));
   return li;
+}
+
+function commentLike(c) {
+  const btn = h("button", { class: "comment-like", type: "button" });
+  const paint = () => {
+    btn.setAttribute("aria-pressed", String(c.liked));
+    btn.setAttribute("aria-label", c.liked ? "Unlike comment" : "Like comment");
+    btn.replaceChildren(heartIcon(c.liked), c.likes ? String(c.likes) : "");
+  };
+  paint();
+  btn.addEventListener("click", async () => {
+    const done = setCommentLiked(c, !c.liked);
+    paint();
+    try {
+      await done;
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : "Couldn't reach Patreon.", 4000);
+    }
+    paint();
+  });
+  return btn;
 }
 
 // One composer per chapter. Reply moves it under that comment; the draft is
@@ -1172,7 +1240,7 @@ function highlight(i, follow = true) {
   }
   if (!follow) return;
   const r = el.getBoundingClientRect();
-  const bottom = controlsOpen() ? $("controls").getBoundingClientRect().height : 0;
+  const bottom = drawerOpen() ? drawer.getBoundingClientRect().height : controlsOpen() ? $("controls").getBoundingClientRect().height : 0;
   if (r.top < barHeight() || r.bottom > innerHeight - bottom) {
     pinUntil = 0;
     scrollTo({ top: r.top + scrollY - barHeight() - 16, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
@@ -1273,6 +1341,7 @@ function updateControls() {
 }
 
 function showControls() {
+  if (drawerOpen()) return; // the drawer has the screen's lower part
   updateControls();
   const c = $("controls");
   c.classList.add("open");
