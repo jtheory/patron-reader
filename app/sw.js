@@ -1,5 +1,5 @@
 // Offline app shell. Posts live in IndexedDB; API calls are never cached here.
-const VERSION = "pr-v18";
+const VERSION = "pr-v19";
 
 const SHELL = ["./", "index.html", "style.css", "app.js", "manifest.webmanifest", "icon.svg", "icon-180.png", "icon-192.png", "listen.js"];
 

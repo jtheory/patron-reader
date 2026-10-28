@@ -903,11 +903,14 @@ async function renderPost(id) {
   );
 
   const bodyEl = h("div", { class: "body" });
-  if (p.image && p.canView) bodyEl.append(h("img", { class: "cover", src: p.image, alt: "", loading: "lazy" }));
   if (p.canView) {
     const content = renderBody(await getBody(id));
+    // Patreon's post image is usually a copy of the first picture in the text.
+    // Like Patreon's app, show it only when the text has no pictures of its own.
+    const cover = p.image && !content?.querySelector?.("img") ? h("img", { class: "cover", src: p.image, alt: "", loading: "lazy" }) : null;
+    if (cover) bodyEl.append(cover);
     if (content) bodyEl.append(content);
-    else if (!p.image) bodyEl.append(h("p", { class: "locked-note" }, "This post has no text. It may be a video or attachment; open it on Patreon to see it."));
+    else if (!cover) bodyEl.append(h("p", { class: "locked-note" }, "This post has no text. It may be a video or attachment; open it on Patreon to see it."));
   } else {
     const teaser = p.teaser ? renderBody({ kind: "json", data: p.teaser }) : null;
     if (teaser) bodyEl.append(teaser);
