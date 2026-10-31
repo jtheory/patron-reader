@@ -174,10 +174,35 @@ function postsPath(campaignId) {
     sort: "-published_at",
     "page[count]": "10",
     "fields[post]": POST_FIELDS,
+    ...FILE_PARAMS,
     "json-api-use-default-includes": "false",
     "json-api-version": "1.0",
   });
 }
+
+// Attached files (an ePub, a PDF…). Newer posts list them as attachments_media,
+// older ones as attachments. Their download links expire, so they're fetched
+// fresh when you tap one (see downloadFile).
+const FILE_PARAMS = {
+  include: "attachments_media,attachments",
+  "fields[media]": "file_name,size_bytes,mimetype,download_url",
+  "fields[attachment]": "name,url",
+};
+
+function shapeFiles(p, inc) {
+  const rel = p.relationships || {};
+  const files = [];
+  for (const d of rel.attachments_media?.data || []) {
+    const m = inc.get("media:" + d.id)?.attributes;
+    if (m) files.push({ id: d.id, name: m.file_name || "Attachment", size: m.size_bytes || 0, url: m.download_url || null });
+  }
+  for (const d of rel.attachments?.data || []) {
+    const a = inc.get("attachment:" + d.id)?.attributes;
+    if (a) files.push({ id: d.id, name: a.name || "Attachment", size: 0, url: a.url || null });
+  }
+  return files;
+}
+const includedMap = (r) => new Map((r.included || []).map((x) => [x.type + ":" + x.id, x]));
 
 // Patreon's "next" links are absolute; we only want the path for the proxy.
 const toPath = (u) => {
@@ -189,7 +214,7 @@ const toPath = (u) => {
   }
 };
 
-function shapePost(p, campaignId) {
+function shapePost(p, campaignId, inc = new Map()) {
   const a = p.attributes || {};
   const body = a.content_json_string || a.content || "";
   return {
@@ -208,6 +233,7 @@ function shapePost(p, campaignId) {
       likes: a.like_count || 0,
       liked: !!a.current_user_has_liked,
       comments: a.comment_count || 0,
+      files: shapeFiles(p, inc),
     },
     body: body ? { kind: a.content_json_string ? "json" : "html", data: body } : null,
   };
@@ -261,7 +287,8 @@ async function doSync() {
   const cursors = (await getMeta("cursors")) || {};
   const errors = await pool(creators, 4, async (c) => {
     const r = await api(postsPath(c.id));
-    const items = (r.data || []).map((p) => shapePost(p, c.id));
+    const inc = includedMap(r);
+    const items = (r.data || []).map((p) => shapePost(p, c.id, inc));
     await mergeAndSave(items);
     // Keep the oldest page's cursor; a refresh only fetches the newest page.
     if (!(c.id in cursors)) cursors[c.id] = toPath(r.links?.next) || null;
@@ -283,7 +310,8 @@ async function loadMore(campaignId) {
   const next = cursors[campaignId];
   if (!next) return false;
   const r = await api(next);
-  await mergeAndSave((r.data || []).map((p) => shapePost(p, campaignId)));
+  const inc = includedMap(r);
+  await mergeAndSave((r.data || []).map((p) => shapePost(p, campaignId, inc)));
   cursors[campaignId] = toPath(r.links?.next) || null;
   await setMeta("cursors", cursors);
   return true;
@@ -381,6 +409,54 @@ function postComment(postId, text, parentId) {
     body: { data: { type: "comment", attributes: { body: text }, relationships } },
   });
 }
+
+// One post's files, with current download links.
+async function fetchFiles(postId) {
+  const r = await api(`/api/posts/${postId}?` + qs({
+    ...FILE_PARAMS,
+    "fields[post]": "title",
+    "json-api-use-default-includes": "false",
+    "json-api-version": "1.0",
+  }));
+  return shapeFiles(r.data || {}, includedMap(r));
+}
+
+// Download a file: a fresh link (they expire), and for older attachments,
+// which live on patreon.com/file and need the session, the Worker swaps it
+// for the signed link Patreon redirects to.
+async function downloadFile(postId, file) {
+  let url = file.url;
+  try {
+    url = (await fetchFiles(postId)).find((f) => f.id === file.id)?.url || url;
+  } catch (e) {
+    if (!url) throw e;
+  }
+  if (!url) throw new ApiError("upstream", "Patreon didn't give a download link for this file.");
+  const u = new URL(url);
+  if (/(^|\.)patreon\.com$/.test(u.hostname) && u.pathname === "/file") {
+    const res = await fetch(settings.base.replace(/\/$/, "") + "/file" + u.search, {
+      headers: { "X-Proxy-Key": settings.key, "X-Patreon-Session": settings.session },
+    }).catch(() => {
+      throw new ApiError("network", "Can't reach the proxy. Check your connection.");
+    });
+    if (!res.ok) throw new ApiError("upstream", `Patreon returned an error (${res.status}) for this file.`);
+    if (/json/.test(res.headers.get("Content-Type") || "")) url = (await res.json()).location;
+    else {
+      // Sent straight back rather than redirected: save what we got.
+      const a = h("a", { href: URL.createObjectURL(await res.blob()), download: file.name });
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+      return;
+    }
+  }
+  // A download opens in the browser (Android then offers an app for it). If the
+  // new tab is blocked, open it here: a download doesn't replace the app.
+  const w = open(url, "_blank");
+  if (w) w.opener = null;
+  else location.href = url;
+}
+
+const fmtSize = (n) => (!n ? "" : n < 1e6 ? Math.max(1, Math.round(n / 1e3)) + " KB" : (n / 1e6).toFixed(1) + " MB");
 
 // ---------------------------------------------------------------- rich text
 
@@ -902,6 +978,22 @@ async function renderPost(id) {
     h("p", { class: "dateline" }, fmtDate(p.published) + (p.unlockedAt ? `, unlocked ${fmtDate(p.unlockedAt)}` : "") + (p.words > 40 && p.canView ? `, ${minutes(p.words)} min read` : ""))
   );
 
+  // Attached files go near the top: sometimes they *are* the chapter.
+  const filesEl = h("div", { class: "files" });
+  const showFiles = (files) => {
+    filesEl.replaceChildren(...(files || []).map((f) => fileButton(p.id, f)));
+  };
+  if (p.canView) {
+    article.append(filesEl);
+    showFiles(p.files);
+    // Saved before files were synced: look them up once.
+    if (!p.files) fetchFiles(p.id).then(async (files) => {
+      p.files = files;
+      await savePosts([{ meta: p }]);
+      showFiles(files);
+    }, () => {});
+  }
+
   const bodyEl = h("div", { class: "body" });
   if (p.canView) {
     const content = renderBody(await getBody(id));
@@ -963,6 +1055,26 @@ async function renderPost(id) {
   // Resume where you left off: back to the saved paragraph, or the top.
   const saved = progress[id];
   restoreReader(typeof saved === "object" && saved.pct < 0.97 ? saved : null);
+}
+
+function fileButton(postId, f) {
+  const btn = h(
+    "button",
+    { class: "file", type: "button" },
+    h("span", { class: "file-icon", "aria-hidden": "true" }, "⤓"),
+    h("span", { class: "file-name" }, f.name),
+    f.size ? h("span", { class: "file-size" }, fmtSize(f.size)) : null
+  );
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      await downloadFile(postId, f);
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : "Couldn't download that file.", 4000);
+    }
+    btn.disabled = false;
+  });
+  return btn;
 }
 
 // Like button and comments, at the end of a chapter. The tap controls reach

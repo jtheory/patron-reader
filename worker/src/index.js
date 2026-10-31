@@ -4,7 +4,8 @@
 // fetch, and Patreon sends no CORS headers for our origin). This Worker:
 //   1. checks a shared secret so only your app can use it,
 //   2. takes your Patreon session_id from a request header,
-//   3. forwards GET /api/... to www.patreon.com with that cookie,
+//   3. forwards GET /api/... (and /file, for older attachments) to
+//      www.patreon.com with that cookie,
 //   4. forwards a short allow-list of writes (like, unlike, comment),
 //   5. returns the response with CORS headers added.
 // Nothing is stored here; the session_id lives only on your device.
@@ -25,7 +26,7 @@ function corsHeaders(env, origin) {
     "Access-Control-Allow-Origin": ok ? origin : allowed[0] || "null",
     "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "X-Proxy-Key, X-Patreon-Session, Content-Type",
-    "Access-Control-Expose-Headers": "X-Upstream-Status, X-Upstream-Mitigated, X-Debug-Csrf",
+    "Access-Control-Expose-Headers": "X-Upstream-Status, X-Upstream-Mitigated, X-Debug-Csrf, Content-Disposition",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
@@ -109,11 +110,14 @@ export default {
     if (url.pathname === "/health") {
       return json(200, { ok: true }, cors);
     }
-    // Only Patreon's JSON API is reachable through this proxy.
-    if (!url.pathname.startsWith("/api/")) {
-      return json(404, { error: "Only /api/* is proxied" }, cors);
+    // Only Patreon's JSON API is reachable through this proxy, plus /file:
+    // older post attachments download from there, and need the session.
+    const isFile = url.pathname === "/file";
+    if (!url.pathname.startsWith("/api/") && !isFile) {
+      return json(404, { error: "Only /api/* and /file are proxied" }, cors);
     }
     const write = request.method !== "GET";
+    if (write && isFile) return json(405, { error: "GET only" }, cors);
     if (write && !isAllowedWrite(request.method, url.pathname)) {
       return json(405, { error: "Only GET, plus liking and commenting" }, cors);
     }
@@ -151,6 +155,12 @@ export default {
       redirect: "manual",
     });
 
+    // /file usually redirects to a signed download link that works without the
+    // session: hand that link back, so the app opens it directly.
+    if (isFile && upstream.status >= 300 && upstream.status < 400 && upstream.headers.get("Location")) {
+      return json(200, { location: new URL(upstream.headers.get("Location"), UPSTREAM).href }, cors);
+    }
+
     // Pass the body through untouched; only add CORS and debug hints.
     // cf-mitigated is how Cloudflare (in front of Patreon) marks a bot challenge.
     const out = new Headers(cors);
@@ -160,6 +170,8 @@ export default {
     const mitigated = upstream.headers.get("cf-mitigated");
     if (mitigated) out.set("X-Upstream-Mitigated", mitigated);
     if (csrfNote) out.set("X-Debug-Csrf", csrfNote);
+    const disposition = upstream.headers.get("Content-Disposition");
+    if (disposition) out.set("Content-Disposition", disposition);
     return new Response(upstream.body, { status: upstream.status, headers: out });
   },
 };

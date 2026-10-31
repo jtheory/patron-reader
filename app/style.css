@@ -294,6 +294,30 @@ main { max-width: calc(var(--measure) + 2 * var(--gutter)); margin: 0 auto; }
   font-style: italic;
   color: var(--quiet);
 }
+/* ---------- reader: attached files ---------- */
+
+.files { display: grid; gap: .5rem; margin: -1rem 0 1.75rem; }
+.files:empty { display: none; }
+.file {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  width: 100%;
+  min-height: 3rem;
+  padding: .55rem .9rem;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--wash);
+  color: var(--ink);
+  font-size: 1rem;
+  text-align: left;
+  cursor: pointer;
+}
+.file:disabled { opacity: .6; cursor: progress; }
+.file-icon { font-size: 1.2rem; color: var(--accent); }
+.file-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.file-size { color: var(--quiet); font-size: .875rem; white-space: nowrap; }
+
 .body {
   line-height: 1.65;
   hyphens: auto;
