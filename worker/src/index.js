@@ -99,6 +99,26 @@ async function csrfSignature(env, headers) {
   }
 }
 
+// Fetch an attachment from Patreon's file host. Only that host (signed links,
+// no cookie needed or sent), so this can't be used to reach anything else.
+async function download(target, env, cors) {
+  let u;
+  try {
+    u = new URL(target);
+  } catch {
+    return json(400, { error: "Bad file link" }, cors);
+  }
+  const testHost = env.UPSTREAM && new URL(env.UPSTREAM).host; // local testing only
+  const ok = (u.protocol === "https:" && /(^|\.)patreonusercontent\.com$/.test(u.hostname)) || u.host === testHost;
+  if (!ok) return json(400, { error: "Only Patreon file links" }, cors);
+  const upstream = await fetch(u, { headers: { "User-Agent": env.USER_AGENT || DEFAULT_UA }, redirect: "follow" });
+  const out = new Headers(cors);
+  out.set("Content-Type", upstream.headers.get("Content-Type") || "application/octet-stream");
+  out.set("Cache-Control", "no-store");
+  out.set("X-Upstream-Status", String(upstream.status));
+  return new Response(upstream.body, { status: upstream.status, headers: out });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -111,13 +131,16 @@ export default {
       return json(200, { ok: true }, cors);
     }
     // Only Patreon's JSON API is reachable through this proxy, plus /file:
-    // older post attachments download from there, and need the session.
+    // older post attachments download from there, and need the session; and
+    // /download, which fetches an attachment's signed link for the app (to
+    // read an ePub in it; Patreon's file host doesn't allow that cross-origin).
     const isFile = url.pathname === "/file";
-    if (!url.pathname.startsWith("/api/") && !isFile) {
-      return json(404, { error: "Only /api/* and /file are proxied" }, cors);
+    const isDownload = url.pathname === "/download";
+    if (!url.pathname.startsWith("/api/") && !isFile && !isDownload) {
+      return json(404, { error: "Only /api/*, /file and /download are proxied" }, cors);
     }
     const write = request.method !== "GET";
-    if (write && isFile) return json(405, { error: "GET only" }, cors);
+    if (write && (isFile || isDownload)) return json(405, { error: "GET only" }, cors);
     if (write && !isAllowedWrite(request.method, url.pathname)) {
       return json(405, { error: "Only GET, plus liking and commenting" }, cors);
     }
@@ -128,6 +151,8 @@ export default {
     if (!session || !/^[A-Za-z0-9_\-.%]+$/.test(session)) {
       return json(400, { error: "Missing or malformed X-Patreon-Session" }, cors);
     }
+
+    if (isDownload) return download(url.searchParams.get("u"), env, cors);
 
     const headers = {
       Cookie: `session_id=${session}`,

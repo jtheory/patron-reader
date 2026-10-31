@@ -1,4 +1,5 @@
 import { webSpeechEngine, Listener } from "./listen.js";
+import { openEpub, resolve as bookPath } from "./epub.js";
 
 // Patron Reader — a quiet feed of the creators you support on Patreon.
 // No build step, no dependencies. Data flow:
@@ -90,6 +91,7 @@ async function mergeAndSave(items) {
   const now = new Date().toISOString();
   for (const it of items) {
     const old = await getPost(it.meta.id);
+    if (old?.epubWords) it.meta.epubWords = old.epubWords; // an ePub read in the app
     if (old?.unlockedAt) it.meta.unlockedAt = old.unlockedAt;
     else if (old && !old.canView && it.meta.canView) {
       it.meta.unlockedAt = now;
@@ -421,10 +423,10 @@ async function fetchFiles(postId) {
   return shapeFiles(r.data || {}, includedMap(r));
 }
 
-// Download a file: a fresh link (they expire), and for older attachments,
-// which live on patreon.com/file and need the session, the Worker swaps it
-// for the signed link Patreon redirects to.
-async function downloadFile(postId, file) {
+// A file's current link: fetched fresh (they expire). Older attachments live
+// on patreon.com/file and need the session, so the Worker swaps that for the
+// signed link Patreon redirects to; or, rarely, sends the file itself (blob).
+async function fileLink(postId, file) {
   let url = file.url;
   try {
     url = (await fetchFiles(postId)).find((f) => f.id === file.id)?.url || url;
@@ -433,27 +435,43 @@ async function downloadFile(postId, file) {
   }
   if (!url) throw new ApiError("upstream", "Patreon didn't give a download link for this file.");
   const u = new URL(url);
-  if (/(^|\.)patreon\.com$/.test(u.hostname) && u.pathname === "/file") {
-    const res = await fetch(settings.base.replace(/\/$/, "") + "/file" + u.search, {
-      headers: { "X-Proxy-Key": settings.key, "X-Patreon-Session": settings.session },
-    }).catch(() => {
-      throw new ApiError("network", "Can't reach the proxy. Check your connection.");
-    });
-    if (!res.ok) throw new ApiError("upstream", `Patreon returned an error (${res.status}) for this file.`);
-    if (/json/.test(res.headers.get("Content-Type") || "")) url = (await res.json()).location;
-    else {
-      // Sent straight back rather than redirected: save what we got.
-      const a = h("a", { href: URL.createObjectURL(await res.blob()), download: file.name });
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 60000);
-      return;
-    }
+  if (!(/(^|\.)patreon\.com$/.test(u.hostname) && u.pathname === "/file")) return { url };
+  const res = await proxyFetch("/file" + u.search);
+  if (/json/.test(res.headers.get("Content-Type") || "")) return { url: (await res.json()).location };
+  return { blob: await res.blob() };
+}
+
+async function proxyFetch(path) {
+  const res = await fetch(settings.base.replace(/\/$/, "") + path, {
+    headers: { "X-Proxy-Key": settings.key, "X-Patreon-Session": settings.session },
+  }).catch(() => {
+    throw new ApiError("network", "Can't reach the proxy. Check your connection.");
+  });
+  if (!res.ok) throw new ApiError("upstream", `Patreon returned an error (${res.status}) for this file.`);
+  return res;
+}
+
+async function downloadFile(postId, file) {
+  const link = await fileLink(postId, file);
+  if (link.blob) {
+    const a = h("a", { href: URL.createObjectURL(link.blob), download: file.name });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    return;
   }
   // A download opens in the browser (Android then offers an app for it). If the
   // new tab is blocked, open it here: a download doesn't replace the app.
-  const w = open(url, "_blank");
+  const w = open(link.url, "_blank");
   if (w) w.opener = null;
-  else location.href = url;
+  else location.href = link.url;
+}
+
+// The file's bytes, for reading it in the app. Patreon's file host doesn't
+// allow fetching cross-origin, so the Worker fetches it (/download).
+async function fileBytes(postId, file) {
+  const link = await fileLink(postId, file);
+  if (link.blob) return link.blob.arrayBuffer();
+  return (await proxyFetch("/download?" + qs({ u: link.url }))).arrayBuffer();
 }
 
 const fmtSize = (n) => (!n ? "" : n < 1e6 ? Math.max(1, Math.round(n / 1e3)) + " KB" : (n / 1e6).toFixed(1) + " MB");
@@ -512,7 +530,8 @@ function renderNode(n) {
 
 // Fallback for posts that only have HTML: copy over an allow-list of tags.
 const ALLOWED = new Set("P BR EM STRONG I B U S A H1 H2 H3 H4 BLOCKQUOTE UL OL LI HR IMG FIGURE FIGCAPTION".split(" "));
-function renderHtml(html) {
+// `img` maps an image's src to a URL to show (for ePubs: a picture inside the book).
+function renderHtml(html, { img = safeUrl } = {}) {
   const doc = new DOMParser().parseFromString(html, "text/html");
   const copy = (src, dest) => {
     for (const n of src.childNodes) {
@@ -529,7 +548,7 @@ function renderHtml(html) {
           el.rel = "noopener noreferrer";
         }
         if (n.tagName === "IMG") {
-          const s = safeUrl(n.getAttribute("src"));
+          const s = img(n.getAttribute("src"));
           if (!s) continue;
           el.src = s;
           el.loading = "lazy";
@@ -654,6 +673,7 @@ function dayLabel(iso) {
 }
 const fmtDate = (iso) => new Date(iso).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 const minutes = (w) => Math.max(1, Math.round(w / 250));
+const wordsOf = (p) => (p.words || 0) + (p.epubWords || 0);
 
 // ---------------------------------------------------------------- routing
 
@@ -780,7 +800,7 @@ async function renderFeed(creatorId) {
     const unread = p.canView && !readSet[p.id];
     const reading = p.canView && isReading(p.id);
     const fresh = p.unlockedAt ? "Unlocked" : "";
-    const len = p.words > 40 ? minutes(p.words) + " min" : "";
+    const len = wordsOf(p) > 40 ? minutes(wordsOf(p)) + " min" : "";
     const right = !p.canView
       ? "Locked"
       : reading
@@ -975,13 +995,14 @@ async function renderPost(id) {
   article.append(
     h("a", { class: "running-head", href: "#/c/" + p.campaignId }, creator?.name || ""),
     h("h1", {}, p.title),
-    h("p", { class: "dateline" }, fmtDate(p.published) + (p.unlockedAt ? `, unlocked ${fmtDate(p.unlockedAt)}` : "") + (p.words > 40 && p.canView ? `, ${minutes(p.words)} min read` : ""))
+    h("p", { class: "dateline" }, fmtDate(p.published) + (p.unlockedAt ? `, unlocked ${fmtDate(p.unlockedAt)}` : "") + (wordsOf(p) > 40 && p.canView ? `, ${minutes(wordsOf(p))} min read` : ""))
   );
 
   // Attached files go near the top: sometimes they *are* the chapter.
+  const book = p.canView ? await getBody(epubKey(id)) : null; // an ePub read in the app
   const filesEl = h("div", { class: "files" });
   const showFiles = (files) => {
-    filesEl.replaceChildren(...(files || []).map((f) => fileButton(p.id, f)));
+    filesEl.replaceChildren(...(files || []).map((f) => fileButton(p, f, book?.fileId === f.id)));
   };
   if (p.canView) {
     article.append(filesEl);
@@ -991,6 +1012,7 @@ async function renderPost(id) {
       p.files = files;
       await savePosts([{ meta: p }]);
       showFiles(files);
+      autoEpub(p, book);
     }, () => {});
   }
 
@@ -1002,7 +1024,15 @@ async function renderPost(id) {
     const cover = p.image && !content?.querySelector?.("img") ? h("img", { class: "cover", src: p.image, alt: "", loading: "lazy" }) : null;
     if (cover) bodyEl.append(cover);
     if (content) bodyEl.append(content);
-    else if (!cover) bodyEl.append(h("p", { class: "locked-note" }, "This post has no text. It may be a video or attachment; open it on Patreon to see it."));
+    if (book) {
+      try {
+        bodyEl.append(h("hr", { class: "epub-start" }), await renderEpub(book.data));
+      } catch (e) {
+        bodyEl.append(h("p", { class: "locked-note" }, "Couldn't open the saved ePub: " + e.message));
+      }
+    } else if (!content && !cover) {
+      bodyEl.append(h("p", { class: "locked-note" }, "This post has no text. It may be a video or attachment; open it on Patreon to see it."));
+    }
   } else {
     const teaser = p.teaser ? renderBody({ kind: "json", data: p.teaser }) : null;
     if (teaser) bodyEl.append(teaser);
@@ -1055,12 +1085,13 @@ async function renderPost(id) {
   // Resume where you left off: back to the saved paragraph, or the top.
   const saved = progress[id];
   restoreReader(typeof saved === "object" && saved.pct < 0.97 ? saved : null);
+  if (p.canView && p.files) autoEpub(p, book);
 }
 
-function fileButton(postId, f) {
+function fileButton(p, f, reading) {
   const btn = h(
     "button",
-    { class: "file", type: "button" },
+    { class: "file", type: "button", "aria-label": "Download " + f.name },
     h("span", { class: "file-icon", "aria-hidden": "true" }, "⤓"),
     h("span", { class: "file-name" }, f.name),
     f.size ? h("span", { class: "file-size" }, fmtSize(f.size)) : null
@@ -1068,13 +1099,85 @@ function fileButton(postId, f) {
   btn.addEventListener("click", async () => {
     btn.disabled = true;
     try {
-      await downloadFile(postId, f);
+      await downloadFile(p.id, f);
     } catch (e) {
       toast(e instanceof ApiError ? e.message : "Couldn't download that file.", 4000);
     }
     btn.disabled = false;
   });
-  return btn;
+  if (!isEpub(f)) return btn;
+  // ePubs can also be read right here, below the post.
+  const read = h("button", { class: "file-read", type: "button" }, reading ? "Read below ↓" : "Read in app");
+  read.addEventListener("click", async () => {
+    if (reading) return scrollToBook();
+    read.disabled = true;
+    read.textContent = "Opening…";
+    try {
+      await readEpubHere(p, f);
+      scrollToBook();
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : "Couldn't open that ePub: " + e.message, 5000);
+      read.disabled = false;
+      read.textContent = "Read in app";
+    }
+  });
+  return h("div", { class: "file-row" }, btn, read);
+}
+
+// ---------------------------------------------------------------- ePubs in the reader
+//
+// An attached ePub can be read below the post, like the rest of the chapter:
+// same typography, saved place, listening. It's kept on the device (the
+// bodies store, as "epub:<post id>"), so it opens offline after the first time.
+
+const isEpub = (f) => /\.epub$/i.test(f.name || "");
+const epubKey = (id) => "epub:" + id;
+let bookUrls = []; // object URLs for the pictures of the ePub on screen
+
+async function renderEpub(data) {
+  for (const u of bookUrls) URL.revokeObjectURL(u);
+  bookUrls = [];
+  const book = await openEpub(data);
+  const frag = document.createDocumentFragment();
+  for (const ch of book.chapters) {
+    // Pictures are files inside the book: give each an object URL first.
+    const pics = new Map();
+    const doc = new DOMParser().parseFromString(ch.html, "text/html");
+    for (const im of doc.querySelectorAll("img[src]")) {
+      const path = bookPath(ch.path, im.getAttribute("src"));
+      if (!path || pics.has(path)) continue;
+      const blob = await book.image(path);
+      pics.set(path, blob ? URL.createObjectURL(blob) : null);
+      if (blob) bookUrls.push(pics.get(path));
+    }
+    frag.append(renderHtml(ch.html, { img: (src) => pics.get(bookPath(ch.path, src)) || null }));
+  }
+  return frag;
+}
+
+async function readEpubHere(p, f) {
+  const data = await fileBytes(p.id, f);
+  const book = await openEpub(data); // check it opens before keeping it
+  if (!book.chapters.length) throw new Error("it has no chapters.");
+  await idb("bodies", "readwrite", (s) => s.put({ fileId: f.id, name: f.name, data }, epubKey(p.id)));
+  p.epubWords = book.chapters.reduce((n, c) => n + countWords(c.html.replace(/<[^>]+>/g, " ")), 0);
+  await savePosts([{ meta: p }]);
+  if (route().name === "post" && route().id === p.id) await render();
+}
+
+function scrollToBook() {
+  const el = view.querySelector(".epub-start");
+  if (!el) return;
+  pinUntil = 0;
+  scrollTo({ top: el.getBoundingClientRect().top + scrollY - barHeight() - 8, behavior: "smooth" });
+}
+
+// A post that's just a short note around one ePub (e.g. "here's this week's
+// chapter"): open the ePub without waiting for a tap.
+function autoEpub(p, book) {
+  const epubs = (p.files || []).filter(isEpub);
+  if (book || epubs.length !== 1 || (p.words || 0) > 400 || !navigator.onLine) return;
+  readEpubHere(p, epubs[0]).catch(() => {}); // the Read in app button is still there
 }
 
 // Like button and comments, at the end of a chapter. The tap controls reach
@@ -2032,7 +2135,7 @@ else if (route().name !== "settings") location.hash = "#/settings";
 // "App updated": fingerprint our own code; if it changed since last launch, say so.
 (async () => {
   try {
-    const parts = await Promise.all(["app.js", "listen.js", "style.css", "index.html"].map((f) => fetch(f, { cache: "no-cache" }).then((r) => r.text())));
+    const parts = await Promise.all(["app.js", "listen.js", "epub.js", "style.css", "index.html"].map((f) => fetch(f, { cache: "no-cache" }).then((r) => r.text())));
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(parts.join("\n")));
     const build = [...new Uint8Array(digest)].slice(0, 8).map((b) => b.toString(16).padStart(2, "0")).join("");
     const seen = LS.get("build", null);

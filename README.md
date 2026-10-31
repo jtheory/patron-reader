@@ -4,7 +4,7 @@ A calm, mobile-first reader for the creators you support on Patreon. Just their 
 
 - One chronological feed across all your creators, or one creator at a time
 - Unread markers (and a half-filled ring for chapters you're partway through), and "Next chapter" at the end of each post
-- Attached files (ePub, PDF…) listed at the top of the chapter, one tap to download
+- Attached files (ePub, PDF…) listed at the top of the chapter, one tap to download; ePubs can be read right in the chapter (and open by themselves when the post is just a note around one), kept for offline reading
 - Like posts and comments; read and write comments in a drawer while you keep reading (drafts are kept, handy for collecting typos)
 - Hold a post in the feed for a menu: like, mark read or unread, more from that creator, share, open on Patreon
 - Remembers exactly where you were reading, even after your phone closes the app
@@ -99,8 +99,8 @@ Open it from the home screen icon from then on, so it runs full-screen and keeps
 
 ### Layout
 
-- `app/`: the reader itself. Plain HTML, CSS and JavaScript; no build step.
-- `worker/`: the Cloudflare Worker. It serves `app/` and forwards `GET /api/*` to Patreon, adding the session cookie. It also passes `GET /file` (older attachments, which need the session; it hands back the signed link Patreon redirects to). The only writes it passes on are liking, unliking and commenting (fetching Patreon's CSRF signature for each). It only allows `/api/*`, requires the `X-Proxy-Key` header, and stores nothing.
+- `app/`: the reader itself (`epub.js` opens ePubs: a small zip reader plus the book's reading order). Plain HTML, CSS and JavaScript; no build step.
+- `worker/`: the Cloudflare Worker. It serves `app/` and forwards `GET /api/*` to Patreon, adding the session cookie. It also passes `GET /download?u=…` (fetches an attachment's signed link from `*.patreonusercontent.com` only, with no cookie, so the app can read an ePub) and `GET /file` (older attachments, which need the session; it hands back the signed link Patreon redirects to). The only writes it passes on are liking, unliking and commenting (fetching Patreon's CSRF signature for each). It only allows `/api/*`, requires the `X-Proxy-Key` header, and stores nothing.
 - `scripts/smoke-test.mjs`: checks your session works and posts are readable, without deploying anything.
 
 ### Smoke test

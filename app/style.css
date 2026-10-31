@@ -317,6 +317,19 @@ main { max-width: calc(var(--measure) + 2 * var(--gutter)); margin: 0 auto; }
 .file-icon { font-size: 1.2rem; color: var(--accent); }
 .file-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .file-size { color: var(--quiet); font-size: .875rem; white-space: nowrap; }
+.file-row { display: flex; gap: .5rem; }
+.file-row .file { flex: 1; min-width: 0; }
+.file-read {
+  flex: none;
+  padding: .55rem .9rem;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: none;
+  color: var(--accent);
+  font-size: .9375rem;
+  cursor: pointer;
+}
+.file-read:disabled { opacity: .6; cursor: progress; }
 
 .body {
   line-height: 1.65;
