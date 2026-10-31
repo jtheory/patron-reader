@@ -1150,7 +1150,13 @@ async function renderEpub(data) {
       pics.set(path, blob ? URL.createObjectURL(blob) : null);
       if (blob) bookUrls.push(pics.get(path));
     }
-    frag.append(renderHtml(ch.html, { img: (src) => pics.get(bookPath(ch.path, src)) || null }));
+    const part = renderHtml(ch.html, { img: (src) => pics.get(bookPath(ch.path, src)) || null });
+    // Many ePubs space paragraphs with empty ones (<p>&nbsp;</p>), which on top
+    // of our own paragraph spacing doubles it. Drop them, as ePub readers do.
+    for (const el of [...part.children]) {
+      if (el.tagName === "P" && !el.querySelector("img") && !el.textContent.replace(/[\s\u00a0\u200b]/g, "")) el.remove();
+    }
+    frag.append(part);
   }
   return frag;
 }
