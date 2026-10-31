@@ -100,7 +100,7 @@ Open it from the home screen icon from then on, so it runs full-screen and keeps
 ### Layout
 
 - `app/`: the reader itself (`epub.js` opens ePubs: a small zip reader plus the book's reading order). Plain HTML, CSS and JavaScript; no build step.
-- `worker/`: the Cloudflare Worker. It serves `app/` and forwards `GET /api/*` to Patreon, adding the session cookie. It also passes `GET /download?u=…` (fetches an attachment's signed link from `*.patreonusercontent.com` only, with no cookie, so the app can read an ePub) and `GET /file` (older attachments, which need the session; it hands back the signed link Patreon redirects to). The only writes it passes on are liking, unliking and commenting (fetching Patreon's CSRF signature for each). It only allows `/api/*`, requires the `X-Proxy-Key` header, and stores nothing.
+- `worker/`: the Cloudflare Worker. It serves `app/` and forwards `GET /api/*` to Patreon, adding the session cookie. It also passes `GET /download?u=…` (fetches an attachment's signed link from `*.patreonusercontent.com` only, with no cookie, so the app can read an ePub) and `GET /file` (older attachments, which need the session; it hands back the signed link Patreon redirects to). The only writes it passes on are liking, unliking and commenting (fetching Patreon's CSRF signature for each). Nothing else is reachable; it requires the `X-Proxy-Key` header, and stores nothing.
 - `scripts/smoke-test.mjs`: checks your session works and posts are readable, without deploying anything.
 
 ### Smoke test
