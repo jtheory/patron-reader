@@ -300,6 +300,10 @@ async function doSync() {
       for (const { meta } of items) if (Date.parse(meta.published) < weekAgo) readSet[meta.id] = 1;
     }
     if (route().name === "feed") render();
+    if (!firstRun) {
+      await recheckLocked(c.id, new Set(items.map((it) => it.meta.id)));
+      if (route().name === "feed") render();
+    }
   });
   await setMeta("cursors", cursors);
   await setMeta("lastSync", Date.now());
@@ -421,6 +425,65 @@ async function fetchFiles(postId) {
     "json-api-version": "1.0",
   }));
   return shapeFiles(r.data || {}, includedMap(r));
+}
+
+// One whole post, as the feed would have it. `campaignId` is the creator to
+// assume if Patreon doesn't say (links in a chapter are to the same creator).
+async function fetchPost(postId, campaignId) {
+  const r = await api(`/api/posts/${postId}?` + qs({
+    "fields[post]": POST_FIELDS,
+    ...FILE_PARAMS,
+    include: FILE_PARAMS.include + ",campaign",
+    "fields[campaign]": "name",
+    "json-api-use-default-includes": "false",
+    "json-api-version": "1.0",
+  }));
+  if (!r?.data) return null;
+  const cid = r.data.relationships?.campaign?.data?.id || campaignId;
+  return shapePost(r.data, cid, includedMap(r));
+}
+
+// Early access: a chapter is often locked for a few weeks, then opened to
+// everyone, oldest first. By then it has dropped off the first page, the only
+// one a refresh fetches, and Patreon gives no sign. So re-check the locked
+// posts at that edge: within EDGE posts of a readable one. When one unlocks,
+// the edge moves on to the next. Each is re-checked at most every few hours.
+const EDGE = 2;
+const RECHECK_MAX = 4; // per creator, per refresh
+const RECHECK_EVERY = 6 * 3600e3;
+
+async function recheckLocked(campaignId, justFetched) {
+  const posts = (await allPosts())
+    .filter((x) => x.campaignId === campaignId && !x.billing)
+    .sort((a, b) => (a.published || "").localeCompare(b.published || ""));
+  const edge = new Set();
+  posts.forEach((p, i) => {
+    if (!p.canView) return;
+    for (let d = -EDGE; d <= EDGE; d++) {
+      const q = posts[i + d];
+      if (q && !q.canView && !justFetched.has(q.id)) edge.add(q);
+    }
+  });
+  const checked = (p) => Date.parse(p.checkedAt || 0) || 0;
+  const now = Date.now();
+  const due = [...edge]
+    .filter((p) => now - checked(p) > RECHECK_EVERY)
+    // Never-checked first; then the oldest, which are the next to unlock.
+    .sort((a, b) => checked(a) - checked(b) || (a.published || "").localeCompare(b.published || ""))
+    .slice(0, RECHECK_MAX);
+  for (const p of due) {
+    const at = new Date().toISOString();
+    try {
+      const fresh = await fetchPost(p.id, campaignId);
+      if (!fresh) continue;
+      fresh.meta.checkedAt = at;
+      await mergeAndSave([fresh]);
+    } catch (e) {
+      if (e.kind === "blocked" || e.kind === "session" || e.kind === "key") throw e;
+      p.checkedAt = at; // gone, or Patreon's error: don't ask again straight away
+      await savePosts([{ meta: p }]);
+    }
+  }
 }
 
 // A file's current link: fetched fresh (they expire). Older attachments live
@@ -1037,8 +1100,17 @@ async function renderPost(id) {
     const teaser = p.teaser ? renderBody({ kind: "json", data: p.teaser }) : null;
     if (teaser) bodyEl.append(teaser);
     bodyEl.append(h("p", { class: "locked-note" }, "Your current tier doesn't include this post."));
+    recheckOpen(p);
   }
   article.append(bodyEl);
+  // A link to another chapter ("Next chapter") opens here, not on Patreon.
+  bodyEl.addEventListener("click", (e) => {
+    const a = e.target.closest("a[href]");
+    const linked = a && patreonPostId(a.href);
+    if (!linked || e.metaKey || e.ctrlKey || e.shiftKey) return;
+    e.preventDefault();
+    openLinkedPost(linked, a.href, p.campaignId);
+  });
 
   const react = p.canView ? reactions(p) : null;
 
@@ -1086,6 +1158,57 @@ async function renderPost(id) {
   const saved = progress[id];
   restoreReader(typeof saved === "object" && saved.pct < 0.97 ? saved : null);
   if (p.canView && p.files) autoEpub(p, book);
+}
+
+// Opening a locked post asks Patreon again, in case it's open to you now
+// (the edge check in recheckLocked only covers the usual pattern).
+async function recheckOpen(p) {
+  try {
+    const fresh = await fetchPost(p.id, p.campaignId);
+    if (!fresh) return;
+    fresh.meta.checkedAt = new Date().toISOString();
+    await mergeAndSave([fresh]);
+    const r = route();
+    if (fresh.meta.canView && r.name === "post" && r.id === p.id) render();
+  } catch {
+    // Still shown as locked; the Patreon link works as before.
+  }
+}
+
+// patreon.com/posts/chapter-12-the-storm-123456789 (or /posts/123456789) → its id.
+function patreonPostId(href) {
+  try {
+    const u = new URL(href);
+    if (!/^(www\.)?patreon\.com$/i.test(u.hostname)) return null;
+    return u.pathname.match(/^\/(?:[^/]+\/)?posts\/(?:[^/]*-)?(\d+)\/?$/)?.[1] || null;
+  } catch {
+    return null;
+  }
+}
+
+async function openLinkedPost(id, href, campaignId) {
+  if (await getPost(id)) {
+    location.hash = "#/p/" + id;
+    return;
+  }
+  // Not saved yet (an older chapter): fetch it, if it's from a creator you support.
+  showStatus("Opening…");
+  try {
+    const fresh = await fetchPost(id, campaignId);
+    const creators = (await getMeta("creators")) || [];
+    if (fresh && !fresh.meta.billing && creators.some((c) => c.id === fresh.meta.campaignId)) {
+      await mergeAndSave([fresh]);
+      showStatus(null);
+      location.hash = "#/p/" + id;
+      return;
+    }
+  } catch {
+    // Fall through to Patreon.
+  }
+  showStatus(null);
+  const w = open(href, "_blank");
+  if (w) w.opener = null;
+  else location.href = href;
 }
 
 function fileButton(p, f, reading) {

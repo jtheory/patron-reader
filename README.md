@@ -12,6 +12,8 @@ A calm, mobile-first reader for the creators you support on Patreon. Just their 
 - Works offline for posts it has already loaded
 - Light and dark themes; tap a chapter for listening, like, comments and text size
 - Pull down on the feed to refresh (it also refreshes on its own when you come back after a while)
+- Spots early-access chapters that have since opened to your tier, even weeks later, and moves them to the top of the feed
+- Links to other chapters ("Next chapter") open in the app
 - Installs to your home screen like an app
 
 Personal project; not affiliated with or endorsed by Patreon. It only shows content your own account can already see.
@@ -134,4 +136,4 @@ Discovered with the smoke test; Patreon's internal API is undocumented and may c
 - **Likes:** `like_count` and `current_user_has_liked` on the post; `POST` / `DELETE /api/posts/{id}/likes` to like and unlike.
 - **Comments:** `comment_count` on the post; `/api/posts/{id}/comments` to read (replies come via `include=replies`); `POST /api/comments` with `post` (and for a reply, `parent`) relationships to write. Writes need an `X-CSRF-Signature` header, which the Worker scrapes from a Patreon page. Liking a comment is `POST /api/comments/{id}/votes` with a `comment-vote` whose `vote` is `"1"` (seen from the website; `"0"` to un-like is a guess). Comments carry `vote_sum` and `current_user_vote`. These write endpoints are from the website's behaviour and haven't been confirmed with the smoke test, which only checks reading comments.
 - **Attachments:** `include=attachments_media` (newer: `media` with `file_name`, `size_bytes`, `download_url`, a signed link that expires) and `include=attachments` (older: `attachment` with `name` and a `patreon.com/file?h=…&i=…` URL that redirects to a signed link). Fresh links come from `/api/posts/{id}`.
-- **Locked posts** have `current_user_can_view: false`. **Billing placeholders** have `is_automated_monthly_charge: true` and are hidden.
+- **Locked posts** have `current_user_can_view: false`. Patreon gives no unlock date, and a refresh only fetches each creator's newest page, so the app re-checks older locked posts one at a time with `/api/posts/{id}`: those within 2 posts of a readable one (where early access usually ends), at most every 6 hours, and any locked post you open. **Billing placeholders** have `is_automated_monthly_charge: true` and are hidden.
